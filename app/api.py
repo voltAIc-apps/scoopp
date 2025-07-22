@@ -674,11 +674,14 @@ async def handle_depth_crawl_request(
             
         logger.info(f"Depth crawl completed: {len(result.results) if hasattr(result, 'results') else 1} pages")
         
-        results = result.results if hasattr(result, 'results') else [result]
-        
+        # results = result.results if hasattr(result, 'results') else [result]
+        results = [
+            r.model_dump() if hasattr(r, 'model_dump') else r
+            for r in (result.results if hasattr(result, 'results') else [result])
+        ]
         return {
             "success": True,
-            "results": [r.model_dump() for r in results],
+            "results": results,
             "crawl_metadata": {
                 "max_depth": max_depth,
                 "strategy": crawl_strategy,
