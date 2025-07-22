@@ -441,6 +441,7 @@ async def crawl(
     Supports both multi-URL crawling and depth crawling:
     - Multi-URL: Provide multiple URLs without max_depth
     - Depth crawling: Provide single URL with max_depth parameter
+    - Available depth strategies: BFS (breadth-first), DFS (depth-first)
     """
     if not crawl_request.urls:
         raise HTTPException(400, "At least one URL required")

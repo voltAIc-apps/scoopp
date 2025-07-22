@@ -489,9 +489,9 @@ async def handle_crawl_request(
         if 'crawler' in locals() and crawler.ready: # Check if crawler was initialized and started
             #  try:
             #      await crawler.close()
-            #  except Exception as close_e:
-            #       logger.error(f"Error closing crawler during exception handling: {close_e}")
-            logger.error(f"Error closing crawler during exception handling: {close_e}")
+            #  except Exception as e:
+            #       logger.error(f"Error closing crawler during exception handling: {e}")
+            logger.error(f"Error closing crawler during exception handling: {e}")
 
         # Measure memory even on error if possible
         end_mem_mb_error = _get_memory_mb()
@@ -548,9 +548,9 @@ async def handle_stream_crawl_request(
         if 'crawler' in locals() and crawler.ready:
             #  try:
             #       await crawler.close()
-            #  except Exception as close_e:
-            #       logger.error(f"Error closing crawler during stream setup exception: {close_e}")
-            logger.error(f"Error closing crawler during stream setup exception: {close_e}")
+            #  except Exception as e:
+            #       logger.error(f"Error closing crawler during stream setup exception: {e}")
+            logger.error(f"Error closing crawler during stream setup exception: {e}")
         logger.error(f"Stream crawl error: {str(e)}", exc_info=True)
         # Raising HTTPException here will prevent streaming response
         raise HTTPException(
@@ -617,7 +617,7 @@ def create_deep_crawl_strategy(strategy_name: str, max_depth: int, include_exter
     elif strategy_name == "dfs":
         return DFSDeepCrawlStrategy(max_depth=max_depth, include_external=include_external)
     else:
-        raise ValueError(f"Unknown crawl strategy: {strategy_name}")
+        raise ValueError(f"Unknown crawl strategy: {strategy_name}. Available strategies: bfs, dfs")
 
 async def handle_depth_crawl_request(
     url: str,
@@ -672,21 +672,39 @@ async def handle_depth_crawl_request(
             mem_delta_mb = end_mem_mb - start_mem_mb
             peak_mem_mb = max(peak_mem_mb if peak_mem_mb else 0, end_mem_mb)
             
-        logger.info(f"Depth crawl completed: {len(result.results) if hasattr(result, 'results') else 1} pages")
+        # Handle different result structures from depth crawling
+        if hasattr(result, 'results') and result.results:
+            # For depth crawling, result.results is a list of CrawlResult objects
+            results = result.results
+            logger.info(f"Depth crawl completed: {len(results)} pages")
+        else:
+            # Single result
+            results = [result]
+            logger.info(f"Depth crawl completed: 1 page")
         
-        # results = result.results if hasattr(result, 'results') else [result]
-        results = [
-            r.model_dump() if hasattr(r, 'model_dump') else r
-            for r in (result.results if hasattr(result, 'results') else [result])
-        ]
+        # Safely convert results to dictionaries
+        processed_results = []
+        for r in results:
+            if hasattr(r, 'model_dump'):
+                processed_results.append(r.model_dump())
+            elif isinstance(r, dict):
+                processed_results.append(r)
+            else:
+                # Fallback: try to convert to dict or use string representation
+                try:
+                    processed_results.append(dict(r) if hasattr(r, '__dict__') else str(r))
+                except Exception as e:
+                    logger.warning(f"Could not convert result to dict: {e}")
+                    processed_results.append({"error": f"Could not serialize result: {type(r)}"})
+        
         return {
             "success": True,
-            "results": results,
+            "results": processed_results,
             "crawl_metadata": {
                 "max_depth": max_depth,
                 "strategy": crawl_strategy,
                 "include_external": include_external,
-                "pages_crawled": len(results)
+                "pages_crawled": len(processed_results)
             },
             "server_processing_time_s": end_time - start_time,
             "server_memory_delta_mb": mem_delta_mb,

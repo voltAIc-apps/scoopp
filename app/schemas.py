@@ -6,8 +6,7 @@ from utils import FilterType
 
 class CrawlStrategy(str, Enum):
     BFS = "bfs"
-    DFS = "dfs" 
-    BEST_FIRST = "best_first"
+    DFS = "dfs"
 
 
 class CrawlRequest(BaseModel):
@@ -16,7 +15,7 @@ class CrawlRequest(BaseModel):
     crawler_config: Optional[Dict] = Field(default_factory=dict)
     # Depth crawling parameters (optional - when provided, enables depth crawling for single URL)
     max_depth: Optional[int] = Field(default=None, ge=0, le=5, description="Enable depth crawling with max depth (0-5). Only works with single URL.")
-    crawl_strategy: Optional[CrawlStrategy] = Field(default=CrawlStrategy.BFS, description="Crawling strategy: bfs, dfs, or best_first")
+    crawl_strategy: Optional[CrawlStrategy] = Field(default=CrawlStrategy.BFS, description="Crawling strategy: bfs (breadth-first) or dfs (depth-first)")
     include_external: Optional[bool] = Field(default=False, description="Whether to follow external domain links")
     max_pages: Optional[int] = Field(default=None, ge=1, le=100, description="Maximum pages to crawl in depth mode")
 
