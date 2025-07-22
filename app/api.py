@@ -153,6 +153,56 @@ def _convert_crawl_result_to_dict(obj, _seen=None):
     # Last resort: return type information instead of string
     return {"_type": type(obj).__name__, "_note": "Unable to serialize this object type"}
 
+def _flatten_results(results):
+    """
+    Flatten nested result structures to ensure we get a flat list of individual results.
+    """
+    flattened = []
+    
+    def _flatten_recursive(item):
+        # Handle None
+        if item is None:
+            return
+        
+        # If it's a list or tuple, recursively flatten its contents
+        if isinstance(item, (list, tuple)):
+            for sub_item in item:
+                _flatten_recursive(sub_item)
+        else:
+            # It's a single item, add it to our flattened list
+            flattened.append(item)
+    
+    _flatten_recursive(results)
+    
+    logger.debug(f"Flattened {type(results)} with {len(results) if hasattr(results, '__len__') else 'unknown'} items into {len(flattened)} items")
+    return flattened
+
+def _ensure_flat_dict_list(processed_results):
+    """
+    Ensure the final result is a flat list of dictionaries, not nested lists.
+    """
+    if not isinstance(processed_results, list):
+        logger.warning(f"Expected list, got {type(processed_results)}, converting...")
+        processed_results = [processed_results]
+    
+    final_results = []
+    
+    for item in processed_results:
+        if isinstance(item, list):
+            # If we still have nested lists, flatten them
+            logger.warning(f"Found nested list in results, flattening...")
+            final_results.extend(_ensure_flat_dict_list(item))
+        elif isinstance(item, dict):
+            # This is what we want - a dictionary
+            final_results.append(item)
+        else:
+            # Convert other types to dict if possible
+            logger.warning(f"Found non-dict item {type(item)}, converting...")
+            final_results.append(_convert_crawl_result_to_dict(item))
+    
+    logger.info(f"Final results: {len(final_results)} dictionaries")
+    return final_results
+
 # --- Helper to get memory ---
 def _get_memory_mb():
     try:
@@ -581,9 +631,13 @@ async def handle_crawl_request(
             peak_mem_mb = max(peak_mem_mb if peak_mem_mb else 0, end_mem_mb) # <--- Get peak memory
         logger.info(f"Memory usage: Start: {start_mem_mb} MB, End: {end_mem_mb} MB, Delta: {mem_delta_mb} MB, Peak: {peak_mem_mb} MB")
                               
+        # Convert and ensure flat structure
+        processed_results = [_convert_crawl_result_to_dict(result) for result in results]
+        processed_results = _ensure_flat_dict_list(processed_results)
+        
         return {
             "success": True,
-            "results": [_convert_crawl_result_to_dict(result) for result in results],
+            "results": processed_results,
             "server_processing_time_s": end_time - start_time,
             "server_memory_delta_mb": mem_delta_mb,
             "server_peak_memory_mb": peak_mem_mb
@@ -780,8 +834,12 @@ async def handle_depth_crawl_request(
         # Handle different result structures from depth crawling
         if hasattr(result, 'results') and result.results:
             # For depth crawling, result.results is a list of CrawlResult objects
-            results = result.results
-            logger.info(f"Depth crawl completed: {len(results)} pages")
+            raw_results = result.results
+            logger.info(f"Depth crawl raw results type: {type(raw_results)}, length: {len(raw_results) if hasattr(raw_results, '__len__') else 'unknown'}")
+            
+            # Flatten nested results if needed
+            results = _flatten_results(raw_results)
+            logger.info(f"Depth crawl completed: {len(results)} pages after flattening")
         else:
             # Single result
             results = [result]
@@ -789,6 +847,9 @@ async def handle_depth_crawl_request(
         
         # Convert results to dictionaries using recursive approach
         processed_results = [_convert_crawl_result_to_dict(r) for r in results]
+        
+        # Final validation - ensure we have a flat list of dicts
+        processed_results = _ensure_flat_dict_list(processed_results)
         
         return {
             "success": True,
