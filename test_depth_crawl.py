@@ -106,6 +106,49 @@ def test_depth_crawl_validation(token):
         print(response.text)
         return False
 
+def test_result_structure(token):
+    """Test that results are properly structured dictionaries without strings"""
+    print("\n=== Testing Result Structure ===")
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Test with a simple crawl to verify result structure
+    crawl_request = {
+        "urls": ["https://httpbin.org/json"],  # Simple JSON endpoint
+        "browser_config": {},
+        "crawler_config": {}
+    }
+    
+    print("Testing result structure with simple crawl...")
+    response = requests.post(f"{BASE_URL}/crawl", json=crawl_request, headers=headers)
+    
+    if response.status_code == 200:
+        result = response.json()
+        results = result.get('results', [])
+        
+        if not results:
+            print("✗ No results returned")
+            return False
+            
+        # Check that results are list of dicts
+        if not isinstance(results, list):
+            print(f"✗ Results should be a list, got {type(results)}")
+            return False
+            
+        for i, r in enumerate(results):
+            if not isinstance(r, dict):
+                print(f"✗ Result {i} should be a dict, got {type(r)}")
+                return False
+                
+        print("✓ All results are properly structured as dictionaries")
+        print(f"  Number of results: {len(results)}")
+        print(f"  First result keys: {list(results[0].keys())[:5]}...")  # Show first 5 keys
+        return True
+    else:
+        print(f"✗ Request failed: {response.status_code}")
+        print(response.text)
+        return False
+
 def main():
     print("Depth Crawling Test Suite")
     print("=" * 50)
@@ -133,14 +176,16 @@ def main():
     test1_passed = test_regular_crawl(token)
     test2_passed = test_depth_crawl(token) 
     test3_passed = test_depth_crawl_validation(token)
+    test4_passed = test_result_structure(token)
     
     print("\n" + "=" * 50)
     print("Test Results:")
     print(f"  Regular Multi-URL Crawl: {'✓ PASSED' if test1_passed else '✗ FAILED'}")
     print(f"  Enhanced Depth Crawl: {'✓ PASSED' if test2_passed else '✗ FAILED'}")
     print(f"  Depth Crawl Validation: {'✓ PASSED' if test3_passed else '✗ FAILED'}")
+    print(f"  Result Structure Test: {'✓ PASSED' if test4_passed else '✗ FAILED'}")
     
-    if test1_passed and test2_passed and test3_passed:
+    if test1_passed and test2_passed and test3_passed and test4_passed:
         print("\n🎉 All tests passed! Enhanced /crawl endpoint is working perfectly.")
     else:
         print("\n❌ Some tests failed. Check the implementation.")

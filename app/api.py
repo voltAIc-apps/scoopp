@@ -48,6 +48,111 @@ import psutil, time
 
 logger = logging.getLogger(__name__)
 
+# --- Helper functions ---
+def _convert_crawl_result_to_dict(obj, _seen=None):
+    """
+    Recursively convert crawl result objects to dictionaries.
+    Preserves all data without converting to strings.
+    Includes circular reference protection.
+    """
+    if _seen is None:
+        _seen = set()
+    
+    # Prevent circular references
+    obj_id = id(obj)
+    if obj_id in _seen:
+        return {"_circular_ref": type(obj).__name__}
+    
+    # Track this object to prevent circular references
+    if not isinstance(obj, (str, int, float, bool, type(None))):
+        _seen.add(obj_id)
+    # Handle None
+    if obj is None:
+        return None
+    
+    # Handle basic types that are already JSON serializable
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    
+    # Handle lists and tuples
+    if isinstance(obj, (list, tuple)):
+        return [_convert_crawl_result_to_dict(item, _seen) for item in obj]
+    
+    # Handle dictionaries
+    if isinstance(obj, dict):
+        return {key: _convert_crawl_result_to_dict(value, _seen) for key, value in obj.items()}
+    
+    # Handle objects with model_dump method (Pydantic models, crawl4ai objects)
+    if hasattr(obj, 'model_dump'):
+        try:
+            dumped = obj.model_dump()
+            # Recursively process the dumped result in case it contains nested objects
+            return _convert_crawl_result_to_dict(dumped, _seen)
+        except Exception as e:
+            logger.warning(f"model_dump() failed for {type(obj)}: {e}")
+            # Fall through to __dict__ approach
+    
+    # Handle objects with to_dict method
+    if hasattr(obj, 'to_dict'):
+        try:
+            return _convert_crawl_result_to_dict(obj.to_dict(), _seen)
+        except Exception as e:
+            logger.warning(f"to_dict() failed for {type(obj)}: {e}")
+    
+    # Handle objects with __dict__ attribute
+    if hasattr(obj, '__dict__'):
+        try:
+            result = {}
+            for key, value in obj.__dict__.items():
+                # Skip private attributes and methods
+                if not key.startswith('_') and not callable(value):
+                    result[key] = _convert_crawl_result_to_dict(value, _seen)
+            return result
+        except Exception as e:
+            logger.warning(f"__dict__ conversion failed for {type(obj)}: {e}")
+    
+    # Handle datetime objects
+    if hasattr(obj, 'isoformat'):
+        try:
+            return obj.isoformat()
+        except Exception:
+            pass
+    
+    # Handle enum objects
+    if hasattr(obj, 'value'):
+        try:
+            return obj.value
+        except Exception:
+            pass
+    
+    # For any other object type, try to extract meaningful data
+    # without falling back to string representation
+    try:
+        # Try to get public attributes
+        if hasattr(obj, '__class__'):
+            result = {"_type": obj.__class__.__name__}
+            for attr in dir(obj):
+                if not attr.startswith('_') and not callable(getattr(obj, attr, None)):
+                    try:
+                        value = getattr(obj, attr)
+                        result[attr] = _convert_crawl_result_to_dict(value, _seen)
+                    except Exception:
+                        continue
+            # Only return if we found some attributes
+            if len(result) > 1:  # More than just _type
+                return result
+    except Exception:
+        pass
+    
+    # Clean up tracking to prevent memory leaks
+    try:
+        _seen.discard(obj_id)
+    except:
+        pass
+    
+    # Last resort: return type information instead of string
+    return {"_type": type(obj).__name__, "_note": "Unable to serialize this object type"}
+
 # --- Helper to get memory ---
 def _get_memory_mb():
     try:
@@ -478,7 +583,7 @@ async def handle_crawl_request(
                               
         return {
             "success": True,
-            "results": [result.model_dump() for result in results],
+            "results": [_convert_crawl_result_to_dict(result) for result in results],
             "server_processing_time_s": end_time - start_time,
             "server_memory_delta_mb": mem_delta_mb,
             "server_peak_memory_mb": peak_mem_mb
@@ -682,20 +787,8 @@ async def handle_depth_crawl_request(
             results = [result]
             logger.info(f"Depth crawl completed: 1 page")
         
-        # Safely convert results to dictionaries
-        processed_results = []
-        for r in results:
-            if hasattr(r, 'model_dump'):
-                processed_results.append(r.model_dump())
-            elif isinstance(r, dict):
-                processed_results.append(r)
-            else:
-                # Fallback: try to convert to dict or use string representation
-                try:
-                    processed_results.append(dict(r) if hasattr(r, '__dict__') else str(r))
-                except Exception as e:
-                    logger.warning(f"Could not convert result to dict: {e}")
-                    processed_results.append({"error": f"Could not serialize result: {type(r)}"})
+        # Convert results to dictionaries using recursive approach
+        processed_results = [_convert_crawl_result_to_dict(r) for r in results]
         
         return {
             "success": True,
