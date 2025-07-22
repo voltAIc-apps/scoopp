@@ -24,8 +24,7 @@ from crawl4ai import (
     RateLimiter, 
     LLMConfig,
     BFSDeepCrawlStrategy,
-    DFSDeepCrawlStrategy,
-    BestFirstDeepCrawlStrategy
+    DFSDeepCrawlStrategy
 )
 from crawl4ai.utils import perform_completion_with_backoff
 from crawl4ai.content_filter_strategy import (
@@ -617,8 +616,6 @@ def create_deep_crawl_strategy(strategy_name: str, max_depth: int, include_exter
         return BFSDeepCrawlStrategy(max_depth=max_depth, include_external=include_external)
     elif strategy_name == "dfs":
         return DFSDeepCrawlStrategy(max_depth=max_depth, include_external=include_external)
-    elif strategy_name == "best_first":
-        return BestFirstDeepCrawlStrategy(max_depth=max_depth, include_external=include_external)
     else:
         raise ValueError(f"Unknown crawl strategy: {strategy_name}")
 
