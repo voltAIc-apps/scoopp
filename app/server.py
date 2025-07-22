@@ -437,14 +437,23 @@ async def crawl(
 ):
     """
     Crawl a list of URLs and return the results as JSON.
+    
+    Supports both multi-URL crawling and depth crawling:
+    - Multi-URL: Provide multiple URLs without max_depth
+    - Depth crawling: Provide single URL with max_depth parameter
     """
     if not crawl_request.urls:
         raise HTTPException(400, "At least one URL required")
+    
     res = await handle_crawl_request(
         urls=crawl_request.urls,
         browser_config=crawl_request.browser_config,
         crawler_config=crawl_request.crawler_config,
         config=config,
+        max_depth=crawl_request.max_depth,
+        crawl_strategy=crawl_request.crawl_strategy.value if crawl_request.crawl_strategy else None,
+        include_external=crawl_request.include_external,
+        max_pages=crawl_request.max_pages,
     )
     return JSONResponse(res)
 
@@ -473,6 +482,7 @@ async def crawl_stream(
             "X-Stream-Status": "active",
         },
     )
+
 
 
 def chunk_code_functions(code_md: str) -> List[str]:

@@ -22,7 +22,10 @@ from crawl4ai import (
     BrowserConfig,
     MemoryAdaptiveDispatcher,
     RateLimiter, 
-    LLMConfig
+    LLMConfig,
+    BFSDeepCrawlStrategy,
+    DFSDeepCrawlStrategy,
+    BestFirstDeepCrawlStrategy
 )
 from crawl4ai.utils import perform_completion_with_backoff
 from crawl4ai.content_filter_strategy import (
@@ -395,15 +398,44 @@ async def handle_crawl_request(
     urls: List[str],
     browser_config: dict,
     crawler_config: dict,
-    config: dict
+    config: dict,
+    max_depth: Optional[int] = None,
+    crawl_strategy: Optional[str] = None,
+    include_external: Optional[bool] = None,
+    max_pages: Optional[int] = None
 ) -> dict:
-    """Handle non-streaming crawl requests."""
+    """Handle non-streaming crawl requests with optional depth crawling."""
     start_mem_mb = _get_memory_mb() # <--- Get memory before
     start_time = time.time()
     mem_delta_mb = None
     peak_mem_mb = start_mem_mb
     
     try:
+        # Validate depth crawling parameters
+        if max_depth is not None:
+            if len(urls) > 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Depth crawling only supports single URL. Provide exactly one URL when using max_depth."
+                )
+            
+            # Enable depth crawling mode
+            url = urls[0]
+            if not url.startswith(('http://', 'https://')):
+                url = 'https://' + url
+            
+            return await handle_depth_crawl_request(
+                url=url,
+                max_depth=max_depth,
+                crawl_strategy=crawl_strategy or "bfs",
+                include_external=include_external or False,
+                max_pages=max_pages,
+                browser_config=browser_config,
+                crawler_config=crawler_config,
+                config=config
+            )
+        
+        # Regular multi-URL crawling
         urls = [('https://' + url) if not url.startswith(('http://', 'https://')) else url for url in urls]
         browser_config = BrowserConfig.load(browser_config)
         crawler_config = CrawlerRunConfig.load(crawler_config)
@@ -534,6 +566,10 @@ async def handle_crawl_job(
     browser_config: Dict,
     crawler_config: Dict,
     config: Dict,
+    max_depth: Optional[int] = None,
+    crawl_strategy: Optional[str] = None,
+    include_external: Optional[bool] = None,
+    max_pages: Optional[int] = None,
 ) -> Dict:
     """
     Fire-and-forget version of handle_crawl_request.
@@ -556,6 +592,10 @@ async def handle_crawl_job(
                 browser_config=browser_config,
                 crawler_config=crawler_config,
                 config=config,
+                max_depth=max_depth,
+                crawl_strategy=crawl_strategy,
+                include_external=include_external,
+                max_pages=max_pages,
             )
             await redis.hset(f"task:{task_id}", mapping={
                 "status": TaskStatus.COMPLETED,
@@ -570,3 +610,101 @@ async def handle_crawl_job(
 
     background_tasks.add_task(_runner)
     return {"task_id": task_id}
+
+def create_deep_crawl_strategy(strategy_name: str, max_depth: int, include_external: bool):
+    """Create appropriate deep crawl strategy based on strategy name."""
+    if strategy_name == "bfs":
+        return BFSDeepCrawlStrategy(max_depth=max_depth, include_external=include_external)
+    elif strategy_name == "dfs":
+        return DFSDeepCrawlStrategy(max_depth=max_depth, include_external=include_external)
+    elif strategy_name == "best_first":
+        return BestFirstDeepCrawlStrategy(max_depth=max_depth, include_external=include_external)
+    else:
+        raise ValueError(f"Unknown crawl strategy: {strategy_name}")
+
+async def handle_depth_crawl_request(
+    url: str,
+    max_depth: int,
+    crawl_strategy: str,
+    include_external: bool,
+    max_pages: Optional[int],
+    browser_config: dict,
+    crawler_config: dict,
+    config: dict
+) -> dict:
+    """Handle depth crawling requests."""
+    start_mem_mb = _get_memory_mb()
+    start_time = time.time()
+    mem_delta_mb = None
+    peak_mem_mb = start_mem_mb
+    
+    try:
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+            
+        browser_config = BrowserConfig.load(browser_config)
+        crawler_config = CrawlerRunConfig.load(crawler_config)
+        
+        deep_crawl_strategy = create_deep_crawl_strategy(crawl_strategy, max_depth, include_external)
+        crawler_config.deep_crawl_strategy = deep_crawl_strategy
+        
+        if max_pages:
+            crawler_config.max_pages = max_pages
+
+        dispatcher = MemoryAdaptiveDispatcher(
+            memory_threshold_percent=config["crawler"]["memory_threshold_percent"],
+            rate_limiter=RateLimiter(
+                base_delay=tuple(config["crawler"]["rate_limiter"]["base_delay"])
+            ) if config["crawler"]["rate_limiter"]["enabled"] else None
+        )
+        
+        from crawler_pool import get_crawler
+        crawler = await get_crawler(browser_config)
+        
+        base_config = config["crawler"]["base_config"]
+        for key, value in base_config.items():
+            if hasattr(crawler_config, key):
+                setattr(crawler_config, key, value)
+
+        result = await crawler.arun(url, config=crawler_config, dispatcher=dispatcher)
+        
+        end_mem_mb = _get_memory_mb()
+        end_time = time.time()
+        
+        if start_mem_mb is not None and end_mem_mb is not None:
+            mem_delta_mb = end_mem_mb - start_mem_mb
+            peak_mem_mb = max(peak_mem_mb if peak_mem_mb else 0, end_mem_mb)
+            
+        logger.info(f"Depth crawl completed: {len(result.results) if hasattr(result, 'results') else 1} pages")
+        
+        results = result.results if hasattr(result, 'results') else [result]
+        
+        return {
+            "success": True,
+            "results": [r.model_dump() for r in results],
+            "crawl_metadata": {
+                "max_depth": max_depth,
+                "strategy": crawl_strategy,
+                "include_external": include_external,
+                "pages_crawled": len(results)
+            },
+            "server_processing_time_s": end_time - start_time,
+            "server_memory_delta_mb": mem_delta_mb,
+            "server_peak_memory_mb": peak_mem_mb
+        }
+
+    except Exception as e:
+        logger.error(f"Depth crawl error: {str(e)}", exc_info=True)
+        
+        end_mem_mb_error = _get_memory_mb()
+        if start_mem_mb is not None and end_mem_mb_error is not None:
+            mem_delta_mb = end_mem_mb_error - start_mem_mb
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=json.dumps({
+                "error": str(e),
+                "server_memory_delta_mb": mem_delta_mb,
+                "server_peak_memory_mb": max(peak_mem_mb if peak_mem_mb else 0, end_mem_mb_error or 0)
+            })
+        )
