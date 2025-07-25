@@ -31,11 +31,15 @@ class LinkedInAuthHandler:
             twofa_callback: Function to call when 2FA is required
         """
         browser_config = BrowserConfig(
-            headless=not interactive_mode,
+            headless=True,  # Always use headless for server environments
             extra_args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-web-security",
-                "--disable-features=VizDisplayCompositor"
+                "--disable-features=VizDisplayCompositor",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-software-rasterizer"
             ],
             viewport_width=1920,
             viewport_height=1080,

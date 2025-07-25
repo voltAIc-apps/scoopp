@@ -541,43 +541,28 @@ async def crawl_linkedin_unified(
                 status_code=400
             )
         
-        # Step 1: Get or create LinkedIn session automatically
-        logger.info(f"Starting LinkedIn crawl for {len(urls)} URLs with user {username}")
+        # For now, try crawling without authentication first
+        # If LinkedIn blocks, user needs to manually provide cookies
+        logger.info(f"Starting LinkedIn crawl for {len(urls)} URLs")
         
-        from session_manager import get_or_create_linkedin_session
-        session_result = await get_or_create_linkedin_session(
-            username=username,
-            password=password,
-            redis=redis,
-            config=config,
-            force_new=force_new_login
-        )
-        
-        if not session_result.get("success"):
-            return JSONResponse(
-                {
-                    "success": False,
-                    "error": f"LinkedIn authentication failed: {session_result.get('error', 'Unknown error')}",
-                    "stage": "authentication"
-                },
-                status_code=401
-            )
-        
-        logger.info(f"LinkedIn authentication successful ({session_result.get('source', 'unknown')})")
-        
-        # Step 2: Crawl with authenticated session
-        browser_config = session_result["browser_config"]
+        # Use enhanced browser config for LinkedIn
+        browser_config = {
+            "headless": True,
+            "extra_args": [
+                "--no-sandbox",
+                "--disable-dev-shm-usage", 
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-web-security"
+            ],
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
         
         # Merge with any additional browser config from request
         request_browser_config = body.get("browser_config", {})
         if request_browser_config:
-            # Preserve cookies and headers, but allow other overrides
-            for key, value in request_browser_config.items():
-                if key not in ["cookies", "headers"]:
-                    browser_config[key] = value
-                elif key == "headers":
-                    # Merge headers, keeping User-Agent from session
-                    browser_config["headers"].update(value)
+            browser_config.update(request_browser_config)
         
         from api import handle_crawl_request
         crawl_result = await handle_crawl_request(
@@ -594,8 +579,9 @@ async def crawl_linkedin_unified(
         # Add authentication info to response
         crawl_result["authentication"] = {
             "username": username,
-            "session_source": session_result.get("source", "unknown"),
-            "authenticated": True
+            "method": "browser_automation",
+            "authenticated": False,
+            "note": "Using enhanced browser config for LinkedIn access"
         }
         
         logger.info(f"LinkedIn crawl completed successfully for {username}")
