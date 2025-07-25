@@ -541,28 +541,67 @@ async def crawl_linkedin_unified(
                 status_code=400
             )
         
-        # For now, try crawling without authentication first
-        # If LinkedIn blocks, user needs to manually provide cookies
-        logger.info(f"Starting LinkedIn crawl for {len(urls)} URLs")
+        # Step 1: Try to get existing session, or extract cookies automatically
+        logger.info(f"Starting LinkedIn crawl for {len(urls)} URLs with automated authentication")
         
-        # Use enhanced browser config for LinkedIn
-        browser_config = {
-            "headless": True,
-            "extra_args": [
-                "--no-sandbox",
-                "--disable-dev-shm-usage", 
-                "--disable-gpu",
-                "--disable-software-rasterizer",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-web-security"
-            ],
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
+        # Check if we have valid cookies from previous session
+        from session_manager import LinkedInSessionManager
+        session_manager = LinkedInSessionManager(redis)
+        session_data = await session_manager.validate_and_refresh_session(username, config)
+        
+        browser_config = None
+        
+        if session_data:
+            # Use existing valid session
+            logger.info("Using existing LinkedIn session")
+            browser_config = {
+                "headless": True,
+                "cookies": session_data["cookies"],
+                "headers": {"User-Agent": session_data.get("user_agent")},
+                "extra_args": ["--no-sandbox", "--disable-dev-shm-usage"]
+            }
+        else:
+            # Extract cookies automatically
+            logger.info("Extracting LinkedIn cookies automatically...")
+            from linkedin_cookie_extractor import LinkedInCookieExtractor
+            
+            extractor = LinkedInCookieExtractor(config)
+            cookie_result = await extractor.get_cookies_with_retry(username, password, max_retries=2)
+            
+            if cookie_result.get("success"):
+                cookies = cookie_result["cookies"]
+                user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                
+                # Save cookies for future use
+                await session_manager.save_session(username, cookies, user_agent)
+                
+                browser_config = {
+                    "headless": True,
+                    "cookies": cookies,
+                    "headers": {"User-Agent": user_agent},
+                    "extra_args": ["--no-sandbox", "--disable-dev-shm-usage"]
+                }
+                logger.info("LinkedIn cookies extracted and session saved")
+            else:
+                # Fallback to unauthenticated crawling
+                logger.warning(f"Cookie extraction failed: {cookie_result.get('error')}. Trying unauthenticated access.")
+                browser_config = {
+                    "headless": True,
+                    "extra_args": [
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-blink-features=AutomationControlled"
+                    ],
+                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
         
         # Merge with any additional browser config from request
         request_browser_config = body.get("browser_config", {})
         if request_browser_config:
-            browser_config.update(request_browser_config)
+            # Don't override cookies if we have them
+            for key, value in request_browser_config.items():
+                if key != "cookies" or not browser_config.get("cookies"):
+                    browser_config[key] = value
         
         from api import handle_crawl_request
         crawl_result = await handle_crawl_request(
@@ -577,11 +616,13 @@ async def crawl_linkedin_unified(
         )
         
         # Add authentication info to response
+        has_cookies = browser_config and browser_config.get("cookies")
         crawl_result["authentication"] = {
             "username": username,
-            "method": "browser_automation",
-            "authenticated": False,
-            "note": "Using enhanced browser config for LinkedIn access"
+            "method": "automated_cookie_extraction" if has_cookies else "unauthenticated",
+            "authenticated": bool(has_cookies),
+            "session_source": "cached" if session_data else ("extracted" if has_cookies else "none"),
+            "note": "Automatically extracted and cached LinkedIn session" if has_cookies else "Unauthenticated access - limited content available"
         }
         
         logger.info(f"LinkedIn crawl completed successfully for {username}")
