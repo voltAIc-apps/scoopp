@@ -78,7 +78,9 @@ __version__ = "0.5.1-d1"
 MAX_PAGES = config["crawler"]["pool"].get("max_pages", 30)
 GLOBAL_SEM = asyncio.Semaphore(MAX_PAGES)
 
-# import logging
+import logging
+
+logger = logging.getLogger(__name__)
 # page_log = logging.getLogger("page_cap")
 # orig_arun = AsyncWebCrawler.arun
 # async def capped_arun(self, *a, **kw):

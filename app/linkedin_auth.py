@@ -2,7 +2,7 @@ import asyncio
 import json
 import time
 from typing import Dict, Optional, Tuple
-from crawl4ai import AsyncWebCrawler, BrowserConfig
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
 import logging
 
 logger = logging.getLogger(__name__)
@@ -35,52 +35,114 @@ class LinkedInAuthHandler:
             extra_args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-web-security",
-                "--disable-features=VizDisplayCompositor",
-                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                "--disable-features=VizDisplayCompositor"
             ],
             viewport_width=1920,
-            viewport_height=1080
+            viewport_height=1080,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         
         try:
             async with AsyncWebCrawler(config=browser_config) as crawler:
-                # Step 1: Navigate to login page
+                # Step 1: Navigate to login page and get initial state
                 logger.info("Navigating to LinkedIn login page...")
-                await crawler.arun("https://www.linkedin.com/login")
-                await asyncio.sleep(2)
-                
-                # Step 2: Fill credentials
-                logger.info("Filling login credentials...")
-                await self._fill_login_form(crawler, username, password)
-                
-                # Step 3: Handle potential challenges
-                login_result = await self._handle_login_challenges(
-                    crawler, 
-                    interactive_mode,
-                    captcha_callback,
-                    twofa_callback
+                login_config = CrawlerRunConfig(
+                    js_code=[
+                        f"""
+                        // Fill login form
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        
+                        const usernameField = document.querySelector('#username');
+                        const passwordField = document.querySelector('#password');
+                        const submitBtn = document.querySelector('button[type="submit"]');
+                        
+                        if (usernameField && passwordField) {{
+                            usernameField.value = '{username}';
+                            usernameField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            
+                            passwordField.value = '{password}';
+                            passwordField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            
+                            if (submitBtn) {{
+                                submitBtn.click();
+                                await new Promise(resolve => setTimeout(resolve, 3000));
+                            }}
+                        }}
+                        
+                        return {{
+                            url: window.location.href,
+                            success: !window.location.href.includes('/login'),
+                            hasLogin: !!document.querySelector('#username'),
+                            hasCaptcha: document.body.innerHTML.toLowerCase().includes('captcha'),
+                            has2FA: document.body.innerHTML.toLowerCase().includes('verification code') || 
+                                   document.body.innerHTML.toLowerCase().includes('two-step'),
+                            hasError: document.body.innerHTML.toLowerCase().includes('incorrect') ||
+                                     document.body.innerHTML.toLowerCase().includes('couldn\\'t find')
+                        }};
+                        """
+                    ]
                 )
                 
-                if login_result["success"]:
-                    # Extract cookies and return
-                    cookies = await self._extract_session_cookies(crawler)
-                    return {
-                        "success": True,
-                        "cookies": cookies,
-                        "browser_config": {
+                result = await crawler.arun("https://www.linkedin.com/login", config=login_config)
+                
+                if not result.success:
+                    return {"success": False, "error": f"Failed to load LinkedIn login page: {result.error_message}"}
+                
+                # Check JavaScript execution result
+                js_result = result.js_execution_result
+                if js_result and len(js_result) > 0:
+                    login_status = js_result[0]
+                    
+                    if login_status.get("success"):
+                        # Login successful, extract cookies
+                        cookies = await self._extract_cookies_from_result(result)
+                        return {
+                            "success": True,
                             "cookies": cookies,
-                            "headers": {
-                                "User-Agent": browser_config.extra_args[-1].split("=")[1]
+                            "browser_config": {
+                                "cookies": cookies,
+                                "headers": {
+                                    "User-Agent": browser_config.user_agent
+                                }
                             }
                         }
-                    }
+                    elif login_status.get("hasError"):
+                        return {"success": False, "error": "Invalid LinkedIn credentials"}
+                    elif login_status.get("hasCaptcha"):
+                        if interactive_mode:
+                            logger.warning("CAPTCHA detected - manual intervention required")
+                            return {"success": False, "error": "CAPTCHA detected. Please solve manually or try again later."}
+                        else:
+                            return {"success": False, "error": "CAPTCHA detected but interactive mode disabled"}
+                    elif login_status.get("has2FA"):
+                        if interactive_mode:
+                            logger.warning("2FA detected - manual intervention required")  
+                            return {"success": False, "error": "2FA required. Please complete manually or provide 2FA callback."}
+                        else:
+                            return {"success": False, "error": "2FA required but interactive mode disabled"}
+                    else:
+                        return {"success": False, "error": "Login failed - unknown reason"}
                 else:
-                    return login_result
+                    return {"success": False, "error": "JavaScript execution failed during login"}
                     
         except Exception as e:
             logger.error(f"Login error: {str(e)}")
             return {"success": False, "error": str(e)}
     
+    async def _extract_cookies_from_result(self, result) -> list:
+        """Extract LinkedIn cookies from crawl result"""
+        try:
+            # crawl4ai doesn't directly expose cookies, but we can try to get them from the page
+            # For now, return empty list and rely on browser session persistence
+            logger.warning("Cookie extraction not fully implemented - using session persistence")
+            return []
+        except Exception as e:
+            logger.error(f"Error extracting cookies: {str(e)}")
+            return []
+
+    # Legacy methods - keeping for compatibility but not used in new implementation
     async def _fill_login_form(self, crawler: AsyncWebCrawler, username: str, password: str):
         """Fill the login form with credentials"""
         fill_script = f"""
