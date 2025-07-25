@@ -52,3 +52,20 @@ class JSEndpointRequest(BaseModel):
         ...,
         description="List of separated JavaScript snippets to execute"
     )
+
+class LinkedInLoginRequest(BaseModel):
+    username: str = Field(..., description="LinkedIn username/email")
+    password: str = Field(..., description="LinkedIn password")
+    force_new: bool = Field(False, description="Force new login even if session exists")
+
+class LinkedInCrawlRequest(BaseModel):
+    urls: List[str] = Field(..., description="LinkedIn URLs to crawl")
+    username: str = Field(..., description="LinkedIn username/email")
+    password: str = Field(..., description="LinkedIn password")
+    crawler_config: Dict = Field(default_factory=dict)
+    browser_config: Optional[Dict] = Field(default_factory=dict, description="Additional browser configuration")
+    max_depth: Optional[int] = Field(None, description="Enable depth crawling")
+    crawl_strategy: Optional[str] = Field("bfs", description="Crawling strategy: bfs or dfs")
+    include_external: Optional[bool] = Field(False, description="Include external links in depth crawl")
+    max_pages: Optional[int] = Field(None, description="Maximum pages to crawl")
+    force_new_login: Optional[bool] = Field(False, description="Force new login even if session exists")

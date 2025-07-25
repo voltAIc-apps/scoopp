@@ -421,6 +421,255 @@ async def get_schema():
 async def health():
     return {"status": "ok", "timestamp": time.time(), "version": __version__}
 
+# LinkedIn Authentication Endpoints
+@app.post("/auth/linkedin/login")
+async def linkedin_login_endpoint(
+    request: Request,
+    token: dict = Depends(token_dep)
+):
+    """Login to LinkedIn and store session"""
+    try:
+        body = await request.json()
+        username = body.get("username")
+        password = body.get("password")
+        force_new = body.get("force_new", False)
+        
+        if not username or not password:
+            return JSONResponse(
+                {"error": "Username and password are required"},
+                status_code=400
+            )
+        
+        from session_manager import get_or_create_linkedin_session
+        result = await get_or_create_linkedin_session(
+            username=username,
+            password=password,
+            redis=redis,
+            config=config,
+            force_new=force_new
+        )
+        
+        # Don't return cookies in response for security
+        if result.get("success"):
+            return JSONResponse({
+                "success": True,
+                "message": "LinkedIn login successful",
+                "source": result.get("source", "unknown"),
+                "username": username
+            })
+        else:
+            return JSONResponse(
+                {"success": False, "error": result.get("error", "Login failed")},
+                status_code=401
+            )
+            
+    except Exception as e:
+        logger.error(f"LinkedIn login endpoint error: {str(e)}")
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=500
+        )
+
+@app.get("/auth/linkedin/sessions")
+async def list_linkedin_sessions(
+    token: dict = Depends(token_dep)
+):
+    """List all stored LinkedIn sessions"""
+    try:
+        from session_manager import LinkedInSessionManager
+        session_manager = LinkedInSessionManager(redis)
+        sessions = await session_manager.list_sessions()
+        return JSONResponse({"sessions": sessions})
+        
+    except Exception as e:
+        logger.error(f"List sessions error: {str(e)}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.delete("/auth/linkedin/session/{username}")
+async def remove_linkedin_session(
+    username: str,
+    token: dict = Depends(token_dep)
+):
+    """Remove a LinkedIn session"""
+    try:
+        from session_manager import LinkedInSessionManager
+        session_manager = LinkedInSessionManager(redis)
+        success = await session_manager.remove_session(username)
+        
+        if success:
+            return JSONResponse({"message": f"Session for {username} removed"})
+        else:
+            return JSONResponse({"error": "Session not found"}, status_code=404)
+            
+    except Exception as e:
+        logger.error(f"Remove session error: {str(e)}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/crawl/linkedin")
+async def crawl_linkedin_unified(
+    request: Request,
+    token: dict = Depends(token_dep)
+):
+    """
+    Unified LinkedIn crawler endpoint with automatic login
+    
+    This endpoint handles:
+    1. Automatic LinkedIn login with credentials
+    2. Session management and validation
+    3. Profile crawling with authentication
+    4. CAPTCHA and 2FA handling
+    
+    Just provide credentials and URLs - everything else is handled automatically!
+    """
+    try:
+        body = await request.json()
+        urls = body.get("urls", [])
+        username = body.get("username")  # LinkedIn username/email
+        password = body.get("password")  # LinkedIn password
+        crawler_config = body.get("crawler_config", {})
+        max_depth = body.get("max_depth")
+        crawl_strategy = body.get("crawl_strategy", "bfs")
+        include_external = body.get("include_external", False)
+        max_pages = body.get("max_pages")
+        force_new_login = body.get("force_new_login", False)
+        
+        if not urls or not username or not password:
+            return JSONResponse(
+                {"error": "URLs, username, and password are required"},
+                status_code=400
+            )
+        
+        # Step 1: Get or create LinkedIn session automatically
+        logger.info(f"Starting LinkedIn crawl for {len(urls)} URLs with user {username}")
+        
+        from session_manager import get_or_create_linkedin_session
+        session_result = await get_or_create_linkedin_session(
+            username=username,
+            password=password,
+            redis=redis,
+            config=config,
+            force_new=force_new_login
+        )
+        
+        if not session_result.get("success"):
+            return JSONResponse(
+                {
+                    "success": False,
+                    "error": f"LinkedIn authentication failed: {session_result.get('error', 'Unknown error')}",
+                    "stage": "authentication"
+                },
+                status_code=401
+            )
+        
+        logger.info(f"LinkedIn authentication successful ({session_result.get('source', 'unknown')})")
+        
+        # Step 2: Crawl with authenticated session
+        browser_config = session_result["browser_config"]
+        
+        # Merge with any additional browser config from request
+        request_browser_config = body.get("browser_config", {})
+        if request_browser_config:
+            # Preserve cookies and headers, but allow other overrides
+            for key, value in request_browser_config.items():
+                if key not in ["cookies", "headers"]:
+                    browser_config[key] = value
+                elif key == "headers":
+                    # Merge headers, keeping User-Agent from session
+                    browser_config["headers"].update(value)
+        
+        from api import handle_crawl_request
+        crawl_result = await handle_crawl_request(
+            urls=urls,
+            browser_config=browser_config,
+            crawler_config=crawler_config,
+            config=config,
+            max_depth=max_depth,
+            crawl_strategy=crawl_strategy,
+            include_external=include_external,
+            max_pages=max_pages
+        )
+        
+        # Add authentication info to response
+        crawl_result["authentication"] = {
+            "username": username,
+            "session_source": session_result.get("source", "unknown"),
+            "authenticated": True
+        }
+        
+        logger.info(f"LinkedIn crawl completed successfully for {username}")
+        return JSONResponse(crawl_result)
+        
+    except Exception as e:
+        logger.error(f"LinkedIn unified crawl error: {str(e)}", exc_info=True)
+        return JSONResponse({
+            "success": False,
+            "error": str(e),
+            "stage": "crawling"
+        }, status_code=500)
+
+@app.post("/crawl/linkedin/session-only")
+async def crawl_linkedin_with_session(
+    request: Request,
+    token: dict = Depends(token_dep)
+):
+    """Crawl LinkedIn profiles using existing stored session (original endpoint)"""
+    try:
+        body = await request.json()
+        urls = body.get("urls", [])
+        username = body.get("username")  # LinkedIn username for session lookup
+        crawler_config = body.get("crawler_config", {})
+        max_depth = body.get("max_depth")
+        crawl_strategy = body.get("crawl_strategy", "bfs")
+        include_external = body.get("include_external", False)
+        max_pages = body.get("max_pages")
+        
+        if not urls or not username:
+            return JSONResponse(
+                {"error": "URLs and username are required"},
+                status_code=400
+            )
+        
+        # Get stored LinkedIn session
+        from session_manager import LinkedInSessionManager
+        session_manager = LinkedInSessionManager(redis)
+        session_data = await session_manager.validate_and_refresh_session(username, config)
+        
+        if not session_data:
+            return JSONResponse(
+                {
+                    "error": "No valid LinkedIn session found. Please login first.",
+                    "hint": "Use POST /auth/linkedin/login to authenticate or use POST /crawl/linkedin with credentials"
+                },
+                status_code=401
+            )
+        
+        # Create browser config with LinkedIn session
+        browser_config = {
+            "cookies": session_data["cookies"],
+            "headers": {
+                "User-Agent": session_data.get("user_agent")
+            },
+            **config.get("crawler", {}).get("browser", {}).get("kwargs", {})
+        }
+        
+        from api import handle_crawl_request
+        result = await handle_crawl_request(
+            urls=urls,
+            browser_config=browser_config,
+            crawler_config=crawler_config,
+            config=config,
+            max_depth=max_depth,
+            crawl_strategy=crawl_strategy,
+            include_external=include_external,
+            max_pages=max_pages
+        )
+        
+        return JSONResponse(result)
+        
+    except Exception as e:
+        logger.error(f"LinkedIn session crawl error: {str(e)}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 
 @app.get(config["observability"]["prometheus"]["endpoint"])
 async def metrics():

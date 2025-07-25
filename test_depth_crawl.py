@@ -135,12 +135,33 @@ def test_result_structure(token):
             print(f"✗ Results should be a list, got {type(results)}")
             return False
             
+        def check_no_nested_lists(obj, path="root"):
+            """Recursively check that there are no nested lists of lists"""
+            if isinstance(obj, list):
+                for i, item in enumerate(obj):
+                    if isinstance(item, list):
+                        print(f"✗ Found nested list at {path}[{i}]: {type(item)}")
+                        return False
+                    elif isinstance(item, dict):
+                        if not check_no_nested_lists(item, f"{path}[{i}]"):
+                            return False
+            elif isinstance(obj, dict):
+                for key, value in obj.items():
+                    if not check_no_nested_lists(value, f"{path}.{key}"):
+                        return False
+            return True
+        
         for i, r in enumerate(results):
             if not isinstance(r, dict):
                 print(f"✗ Result {i} should be a dict, got {type(r)}")
                 return False
+            
+            # Check for nested list structures
+            if not check_no_nested_lists(r, f"results[{i}]"):
+                return False
                 
         print("✓ All results are properly structured as dictionaries")
+        print("✓ No nested list(list(dict)) structures found")
         print(f"  Number of results: {len(results)}")
         print(f"  First result keys: {list(results[0].keys())[:5]}...")  # Show first 5 keys
         return True

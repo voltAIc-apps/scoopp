@@ -43,6 +43,7 @@ from utils import (
     should_cleanup_task,
     decode_redis_hash
 )
+from linkedin_auth import LinkedInAuthHandler, console_2fa_callback, console_captcha_callback
 
 import psutil, time
 
@@ -517,6 +518,55 @@ def create_task_response(task: dict, task_id: str, base_url: str) -> dict:
         response["error"] = task["error"]
 
     return response
+
+async def handle_linkedin_login(
+    username: str,
+    password: str,
+    config: dict,
+    interactive_mode: bool = True,
+    use_2fa_callback: bool = False
+) -> dict:
+    """Handle LinkedIn login with CAPTCHA and 2FA support"""
+    try:
+        auth_handler = LinkedInAuthHandler(config)
+        
+        # Set up callbacks if needed
+        captcha_callback = console_captcha_callback if interactive_mode else None
+        twofa_callback = console_2fa_callback if use_2fa_callback else None
+        
+        result = await auth_handler.enhanced_linkedin_login(
+            username=username,
+            password=password,
+            interactive_mode=interactive_mode,
+            captcha_callback=captcha_callback,
+            twofa_callback=twofa_callback
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"LinkedIn login error: {str(e)}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+async def validate_linkedin_session(cookies: list, config: dict) -> bool:
+    """Validate if LinkedIn session cookies are still valid"""
+    try:
+        browser_config = BrowserConfig(
+            headless=True,
+            cookies=cookies
+        )
+        
+        async with AsyncWebCrawler(config=browser_config) as crawler:
+            result = await crawler.arun("https://www.linkedin.com/feed/")
+            
+            # Check if we're still logged in
+            if "/login" in result.url or "Sign in" in result.markdown:
+                return False
+            return True
+            
+    except Exception as e:
+        logger.error(f"Session validation error: {str(e)}")
+        return False
 
 async def stream_results(crawler: AsyncWebCrawler, results_gen: AsyncGenerator) -> AsyncGenerator[bytes, None]:
     """Stream results with heartbeats and completion markers."""
