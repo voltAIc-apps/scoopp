@@ -90,3 +90,10 @@ crawl_timeout = 10     # Default timeout per crawl (seconds)
 
 ![image](https://github.com/user-attachments/assets/6bdc10ef-082d-4b77-a52b-ced7b461bc18)
 
+---
+# Around the Planet
+
+https://github.com/zaidmukaddam/scira
+https://exa.sh/
+
+<img width="1290" height="842" alt="image" src="https://github.com/user-attachments/assets/d4f02302-636a-4fb3-97ca-644f5d0bd0ff" />
