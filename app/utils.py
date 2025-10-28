@@ -2,8 +2,10 @@ import logging
 import bleach
 from pathlib import Path
 import os
-from crawl4ai import crawl_url
-import logging
+import asyncio
+from crawl4ai import AsyncWebCrawler
+from crawl4ai.extraction_strategy import LLMExtractionStrategy
+from crawl4ai.chunking_strategy import RegexChunking
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
 LOG_DIR = Path(os.environ.get("LOG_DIR", "./logs"))
@@ -42,9 +44,11 @@ def save_markdown(crawl_id: str, content: str):
         raise
     return file_path
 
-def crawl_and_store(url: str, crawl_id: str, crawl_depth: int = None, crawl_timeout: int = None):
+async def crawl_and_store_async(url: str, crawl_id: str, crawl_depth: int = None, crawl_timeout: int = None):
+    """Async version using crawl4ai AsyncWebCrawler"""
     import configparser
     import time
+
     config = configparser.ConfigParser()
     config.read(DATA_DIR / "../crawl.config")
     default_depth = int(config.get("settings", "crawl_depth", fallback="2"))
@@ -55,17 +59,34 @@ def crawl_and_store(url: str, crawl_id: str, crawl_depth: int = None, crawl_time
 
     start_time = time.time()
     try:
-        raw_content = crawl_url(url, return_format="markdown", max_depth=depth, timeout=timeout)
+        async with AsyncWebCrawler(verbose=True) as crawler:
+            result = await crawler.arun(
+                url=url,
+                word_count_threshold=10,
+                bypass_cache=True,
+                page_timeout=timeout * 1000  # Convert seconds to milliseconds
+            )
+            raw_content = result.markdown if result.success else ""
+
+            if not result.success:
+                raise Exception(f"Crawl failed: {result.error_message}")
+
     except Exception as e:
         logging.error(f"Crawl failed for {crawl_id} with error: {e}")
         raise
+
     duration = time.time() - start_time
     logging.info(f"Crawl completed for {crawl_id} in {duration:.2f} seconds with timeout={timeout}s")
 
+    # Sanitize the markdown content
     sanitized_content = bleach.clean(
         raw_content,
-        tags=["p", "a", "ul", "li", "strong", "em", "code"],
+        tags=["p", "a", "ul", "li", "strong", "em", "code", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote"],
         attributes={"a": ["href"]},
         strip=True
     )
     return save_markdown(crawl_id, sanitized_content)
+
+def crawl_and_store(url: str, crawl_id: str, crawl_depth: int = None, crawl_timeout: int = None):
+    """Sync wrapper for backward compatibility"""
+    return asyncio.run(crawl_and_store_async(url, crawl_id, crawl_depth, crawl_timeout))
