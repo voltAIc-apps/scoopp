@@ -1,13 +1,27 @@
-version: '3.9'
+version: '3.8'
 
 services:
   crawl4ai-service:
-    build: .
-    ports:
-      - "8000:8000"
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_TYPE: default  # or "all", "transformer", "torch"
+        ENABLE_GPU: false
+    container_name: crawl4ai-service
+    environment:
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      PYTHON_ENV: production
     volumes:
       - ./data:/data
-      - ./logs:/logs 
-    environment:
-      - DATA_DIR=/data
-      - LOG_DIR=/logs
+      - ./logs:/logs
+    ports:
+      - "8000:11235"  # Map host port 8000 to container port 11235
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11235/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Increased to allow more startup time
