@@ -68,6 +68,9 @@ from redis import asyncio as aioredis
 # ── internal imports (after sys.path append) ─────────────────
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 
+import uuid
+from history_db import save_crawl, get_history, get_crawl
+
 # ────────────────── configuration / logging ──────────────────
 config = load_config()
 setup_logging(config)
@@ -119,6 +122,19 @@ app = FastAPI(
     title=config["app"]["title"],
     version=config["app"]["version"],
     lifespan=lifespan,
+)
+
+# ── CORS for web-UI access ─────────────────────────────────
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://192.168.2.93:3000",
+        "http://localhost:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ── static playground ──────────────────────────────────────
@@ -231,7 +247,7 @@ async def config_dump(raw: RawCode):
         raise HTTPException(400, str(e))
 
 
-@app.post("/md") 
+@app.post("/md")
 @limiter.limit(config["rate_limiting"]["default_limit"])
 @mcp_tool("md")
 async def get_markdown(
@@ -242,17 +258,47 @@ async def get_markdown(
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(
             400, "URL must be absolute and start with http/https")
-    markdown = await handle_markdown_request(
-        body.url, body.f, body.q, body.c, config
-    )
-    return JSONResponse({
-        "url": body.url,
-        "filter": body.f,
-        "query": body.q,
-        "cache": body.c,
-        "markdown": markdown,
-        "success": True
-    })
+
+    start_time = time.time()
+    crawl_id = str(uuid.uuid4())[:8]
+
+    try:
+        markdown = await handle_markdown_request(
+            body.url, body.f, body.q, body.c, config
+        )
+        processing_time = time.time() - start_time
+
+        # Save to history
+        save_crawl(
+            crawl_id=crawl_id,
+            request_type="md",
+            urls=[body.url],
+            status="completed",
+            success=True,
+            pages_crawled=1,
+            processing_time=processing_time,
+            markdown_preview=markdown[:500] if markdown else None
+        )
+
+        return JSONResponse({
+            "crawl_id": crawl_id,
+            "url": body.url,
+            "filter": body.f,
+            "query": body.q,
+            "cache": body.c,
+            "markdown": markdown,
+            "success": True
+        })
+    except Exception as e:
+        save_crawl(
+            crawl_id=crawl_id,
+            request_type="md",
+            urls=[body.url],
+            status="failed",
+            success=False,
+            error_message=str(e)
+        )
+        raise
 
 
 @app.post("/html")
@@ -422,6 +468,28 @@ async def get_schema():
 @app.get(config["observability"]["health_check"]["endpoint"])
 async def health():
     return {"status": "ok", "timestamp": time.time(), "version": __version__}
+
+
+# ── Crawl History Endpoints ──────────────────────────────────
+@app.get("/history")
+async def get_crawl_history(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0)
+):
+    """Get list of crawl history records."""
+    history = get_history(limit=limit, offset=offset)
+    return JSONResponse({"history": history, "limit": limit, "offset": offset})
+
+
+@app.get("/history/{crawl_id}")
+async def get_crawl_details(crawl_id: str):
+    """Get details for a specific crawl."""
+    from history_db import get_crawl as get_crawl_record
+    record = get_crawl_record(crawl_id)
+    if not record:
+        raise HTTPException(404, f"Crawl {crawl_id} not found")
+    return JSONResponse(record)
+
 
 # LinkedIn Authentication Endpoints
 @app.post("/auth/linkedin/login")
@@ -715,7 +783,7 @@ async def crawl(
 ):
     """
     Crawl a list of URLs and return the results as JSON.
-    
+
     Supports both multi-URL crawling and depth crawling:
     - Multi-URL: Provide multiple URLs without max_depth
     - Depth crawling: Provide single URL with max_depth parameter
@@ -723,18 +791,55 @@ async def crawl(
     """
     if not crawl_request.urls:
         raise HTTPException(400, "At least one URL required")
-    
-    res = await handle_crawl_request(
-        urls=crawl_request.urls,
-        browser_config=crawl_request.browser_config,
-        crawler_config=crawl_request.crawler_config,
-        config=config,
-        max_depth=crawl_request.max_depth,
-        crawl_strategy=crawl_request.crawl_strategy.value if crawl_request.crawl_strategy else None,
-        include_external=crawl_request.include_external,
-        max_pages=crawl_request.max_pages,
-    )
-    return JSONResponse(res)
+
+    crawl_id = str(uuid.uuid4())[:8]
+
+    try:
+        res = await handle_crawl_request(
+            urls=crawl_request.urls,
+            browser_config=crawl_request.browser_config,
+            crawler_config=crawl_request.crawler_config,
+            config=config,
+            max_depth=crawl_request.max_depth,
+            crawl_strategy=crawl_request.crawl_strategy.value if crawl_request.crawl_strategy else None,
+            include_external=crawl_request.include_external,
+            max_pages=crawl_request.max_pages,
+        )
+
+        # Extract markdown preview from first result
+        results = res.get("results", [])
+        markdown_preview = None
+        if results and len(results) > 0:
+            first_result = results[0]
+            markdown_preview = first_result.get("markdown", "")[:500] if first_result.get("markdown") else None
+
+        # Save to history
+        save_crawl(
+            crawl_id=crawl_id,
+            request_type="crawl",
+            urls=crawl_request.urls,
+            status="completed" if res.get("success") else "failed",
+            success=res.get("success", False),
+            max_depth=crawl_request.max_depth,
+            pages_crawled=len(results),
+            processing_time=res.get("server_processing_time_s"),
+            markdown_preview=markdown_preview
+        )
+
+        res["crawl_id"] = crawl_id
+        return JSONResponse(res)
+
+    except Exception as e:
+        save_crawl(
+            crawl_id=crawl_id,
+            request_type="crawl",
+            urls=crawl_request.urls,
+            status="failed",
+            success=False,
+            error_message=str(e),
+            max_depth=crawl_request.max_depth
+        )
+        raise
 
 
 @app.post("/crawl/stream")

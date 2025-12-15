@@ -6,22 +6,50 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        INSTALL_TYPE: default  # or "all", "transformer", "torch"
+        INSTALL_TYPE: default
         ENABLE_GPU: false
     container_name: crawl4ai-service
     environment:
-      REDIS_HOST: 127.0.0.1
+      REDIS_HOST: redis
       REDIS_PORT: 6379
       PYTHON_ENV: production
+      DATA_DIR: /data
+      LOG_DIR: /logs
     volumes:
       - ./data:/data
       - ./logs:/logs
     ports:
-      - "8000:11235"  # Map host port 8000 to container port 11235
+      - "8001:11235"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:11235/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s  # Increased to allow more startup time
+      start_period: 60s
+    networks:
+      - scoopp-net
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: scoopp-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - scoopp-net
+
+  web-ui:
+    build: ./web-UI
+    container_name: scoopp-web-ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - crawl4ai-service
+    networks:
+      - scoopp-net
+
+networks:
+  scoopp-net:
+    driver: bridge
