@@ -11,7 +11,13 @@ import base64
 
 instance = JWT()
 security = HTTPBearer(auto_error=False)
-SECRET_KEY = os.environ.get("SECRET_KEY", "mysecret")
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+if not SECRET_KEY:
+    import logging as _log
+    _log.getLogger(__name__).warning(
+        "SECRET_KEY not set — using random key (tokens will not survive restarts)")
+    import secrets
+    SECRET_KEY = secrets.token_urlsafe(32)
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 def get_jwk_from_secret(secret: str):

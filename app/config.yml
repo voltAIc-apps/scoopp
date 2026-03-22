@@ -1,9 +1,9 @@
 # Application Configuration
 app:
-  title: "Crawl4AI API"
-  version: "1.0.0"
+  title: "Scoopp"
+  version: "0.6.0"
   host: "0.0.0.0"
-  port: 11234
+  port: 11235
   reload: False
   workers: 1
   timeout_keep_alive: 300
@@ -25,10 +25,11 @@ redis:
   ssl_ca_certs: None
   ssl_certfile: None
   ssl_keyfile: None
-  ssl_cert_reqs: None
-  ssl_ca_certs: None
-  ssl_certfile: None
-  ssl_keyfile: None
+
+# CORS Configuration
+cors:
+  allowed_origins:
+    - "http://10.0.99.1:3000"
 
 # Rate Limiting Configuration
 rate_limiting:
@@ -40,7 +41,8 @@ rate_limiting:
 # Security Configuration
 security:
   enabled: false 
-  jwt_enabled: false 
+  jwt_enabled: false
+  token_expire_minutes: 60
   https_redirect: false
   trusted_hosts: ["*"]
   headers:

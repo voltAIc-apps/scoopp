@@ -1,93 +1,71 @@
-# 🕸️ Crawl4AI FastAPI Service
+# Scoopp
 
-This project exposes [`crawl4ai`](https://pypi.org/project/crawl4ai/) as a Dockerized microservice with a FastAPI interface for programmatically crawling web content and storing results as sanitized Markdown files. It supports crawl depth and timeout controls per request, persistent crawl status storage via SQLite, logging, and is ready for Celery integration.
+Web crawling and company research microservice built on crawl4ai with FastAPI.
 
----
+## Services
 
-## 🛠 Features
+| Service | Port | Description |
+|---------|------|-------------|
+| Backend (FastAPI) | 8002 | Crawl, research, LLM extraction endpoints |
+| Web-UI (Vue.js) | 3000 | Crawl interface with history |
+| Redis | 6379 | Task queue, session cache |
 
-* FastAPI-based web service for managing crawls
-* Persistent crawl ID and status tracking using SQLite
-* Configurable and per-request crawl depth and timeout
-* HTML sanitization using `bleach`
-* Persistent logs written to `/data/crawl4ai.log`
-* File-based crawl results (`/data/<crawl_id>.md`)
-* Configurable via `crawl.config`
-* Dockerized setup with `docker-compose`
-
----
-
-## 📁 Project Structure
-
-```
-crawl4ai-service/
-├── app/                 # FastAPI backend and logic
-│   ├── main.py
-│   ├── models.py
-│   ├── utils.py
-│   ├── db.py
-│   └── auth_dummy.py
-├── data/                # Output files + logs + sqlite db
-├── crawl.config         # Default settings (depth, timeout)
-├── requirements.txt
-├── Dockerfile
-└── docker-compose.yaml
-```
-
----
-
-## 🚀 Quickstart
-
-### 1. Build & Run
+## Quick start
 
 ```bash
-docker-compose up --build
+cp .env.example .env   # fill in API keys
+docker compose up -d
 ```
 
-### 2. Test API (with curl)
+Backend: http://10.0.99.1:8002
+Web-UI: http://10.0.99.1:3000
+API docs: http://10.0.99.1:8002/docs
 
-```bash
-curl -X POST http://localhost:8000/crawl \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "crawl_depth": 2, "crawl_timeout": 5}'
+## API endpoints
+
+### Crawling
+- `POST /crawl` — multi-URL or depth crawl
+- `POST /crawl/stream` — streaming crawl (NDJSON)
+- `POST /md` — single URL markdown extraction
+- `POST /html` — HTML extraction
+- `POST /screenshot` — page screenshot
+- `POST /pdf` — PDF export
+
+### Research (spec: specs/001_research_pipeline.md)
+- `POST /research` — company enrichment pipeline (requires X-API-Key)
+- `GET /research/{id}` — poll research result
+
+### Jobs (async)
+- `POST /llm/job` — enqueue LLM extraction
+- `GET /llm/job/{id}` — poll LLM result
+- `POST /crawl/job` — enqueue crawl
+- `GET /crawl/job/{id}` — poll crawl result
+
+### History
+- `GET /history` — crawl history list
+- `GET /history/{crawl_id}` — single crawl details
+
+### LinkedIn
+- `POST /auth/linkedin/login` — login and store session
+- `POST /crawl/linkedin` — crawl LinkedIn profiles
+
+### System
+- `GET /health` — health check
+- `GET /metrics` — Prometheus metrics
+
+## Environment variables
+
+See `.env.example` for required configuration.
+
+## Project structure
+
 ```
-
----
-
-## 🧩 Configuration
-
-Edit `crawl.config`:
-
-```ini
-[settings]
-crawl_depth = 2        # Default max crawl depth
-crawl_timeout = 10     # Default timeout per crawl (seconds)
+app/              Backend (FastAPI + Python)
+  routers/        Route handlers
+  services/       Business logic (researcher, mailer, brave_search)
+  models/         Pydantic models
+web-UI/           Frontend (Vue.js + Vite)
+specs/            Feature specifications
+tests/            Test suite
+data/             Runtime data (SQLite, mounted volume)
 ```
-
----
-
-## 📜 API Endpoints
-
-| Endpoint             | Method | Description                        |
-| -------------------- | ------ | ---------------------------------- |
-| `/crawl`             | POST   | Trigger a new crawl                |
-| `/status/{crawl_id}` | GET    | Check crawl status                 |
-| `/result/{crawl_id}` | GET    | Retrieve sanitized Markdown result |
-| `/list`              | GET    | List all stored `.md` results      |
-| `/health`            | GET    | Simple health check                |
-
----
-
-## 🛡️ Security & Improvements
-
-* [ ] Add authentication (OAuth2 or API Key)
-* [ ] Replace file-based crawl ID with atomic SQLite sequence
-* [ ] Add CORS headers for browser clients
-* [ ] Integrate Celery for background queueing (SQLite → Redis)
-* [ ] Implement file size limits / storage cleanup policies
-
----
-
-## 📝 License
-
-MIT License.

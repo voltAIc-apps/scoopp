@@ -9,6 +9,8 @@ services:
         INSTALL_TYPE: default
         ENABLE_GPU: false
     container_name: crawl4ai-service
+    env_file:
+      - .env
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -19,7 +21,7 @@ services:
       - ./data:/data
       - ./logs:/logs
     ports:
-      - "8001:11235"
+      - "8002:11235"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:11235/health || exit 1"]
@@ -30,13 +32,19 @@ services:
     networks:
       - scoopp-net
     depends_on:
-      - redis
+      redis:
+        condition: service_started
 
   redis:
     image: redis:7-alpine
     container_name: scoopp-redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     networks:
       - scoopp-net
 
@@ -46,7 +54,8 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - crawl4ai-service
+      crawl4ai-service:
+        condition: service_healthy
     networks:
       - scoopp-net
 

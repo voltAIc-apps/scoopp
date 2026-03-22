@@ -1,5 +1,5 @@
 <template>
-  <div class="card result-viewer">
+  <div id="result-viewer" class="card result-viewer">
     <div class="result-header">
       <h3>Ergebnis: {{ result.url }}</h3>
       <div class="result-meta">
@@ -45,21 +45,27 @@ const props = defineProps({
 })
 
 const md = new MarkdownIt({
-  html: true,
+  html: false,
   linkify: true,
   typographer: true
 })
 
 const copied = ref(false)
 
+// crawl4ai returns markdown as {raw_markdown, fit_markdown, ...} object
+function extractMarkdown(val) {
+  if (!val) return ''
+  if (typeof val === 'string') return val
+  if (typeof val === 'object') return val.fit_markdown || val.raw_markdown || ''
+  return ''
+}
+
 const renderedMarkdown = computed(() => {
-  if (!props.result.markdown) return ''
-  return md.render(props.result.markdown)
+  return md.render(extractMarkdown(props.result.markdown))
 })
 
 function renderMarkdown(content) {
-  if (!content) return ''
-  return md.render(content)
+  return md.render(extractMarkdown(content))
 }
 
 function formatTime(timestamp) {
@@ -69,23 +75,34 @@ function formatTime(timestamp) {
 
 function getMarkdownContent() {
   if (props.result.markdown) {
-    return props.result.markdown
+    return extractMarkdown(props.result.markdown)
   }
   if (props.result.results) {
     return props.result.results
-      .map(r => `# ${r.url || 'Seite'}\n\n${r.markdown || r.content || ''}`)
+      .map(r => `# ${r.url || 'Seite'}\n\n${extractMarkdown(r.markdown) || r.content || ''}`)
       .join('\n\n---\n\n')
   }
   return ''
 }
 
 async function copyToClipboard() {
+  const text = getMarkdownContent()
   try {
-    await navigator.clipboard.writeText(getMarkdownContent())
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      // fallback for HTTP (non-HTTPS) contexts
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
     copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
+    setTimeout(() => { copied.value = false }, 2000)
   } catch (e) {
     console.error('Kopieren fehlgeschlagen:', e)
   }

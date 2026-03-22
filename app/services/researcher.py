@@ -175,14 +175,9 @@ async def _extract_company_fields(
     markdown: str, config: dict
 ) -> Optional[Dict[str, str]]:
     """Use LLM to extract structured company fields from crawled markdown."""
-    from crawl4ai import LLMConfig
+    from utils import get_llm_api_key
 
-    # resolve LLM API key (same pattern as api.py)
-    llm_cfg = config.get("llm", {})
-    if "api_key" in llm_cfg:
-        api_key = llm_cfg["api_key"]
-    else:
-        api_key = os.environ.get(llm_cfg.get("api_key_env", ""), "")
+    api_key = get_llm_api_key(config)
 
     if not api_key:
         logger.warning("No LLM API key configured, skipping extraction")

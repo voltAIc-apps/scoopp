@@ -1,7 +1,7 @@
 # Crawl history SQLite database module
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Optional
 import os
@@ -37,6 +37,10 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_created_at
         ON crawl_history(created_at DESC)
     """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_status
+        ON crawl_history(status)
+    """)
     conn.commit()
     conn.close()
 
@@ -63,7 +67,7 @@ def save_crawl(
         crawl_id,
         request_type,
         status,
-        datetime.utcnow().isoformat(),
+        datetime.now(timezone.utc).isoformat(),
         json.dumps(urls),
         1 if success else 0,
         error_message,

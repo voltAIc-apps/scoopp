@@ -41,7 +41,9 @@ from utils import (
     get_base_url,
     is_task_id,
     should_cleanup_task,
-    decode_redis_hash
+    decode_redis_hash,
+    normalize_url,
+    get_llm_api_key,
 )
 from linkedin_auth import LinkedInAuthHandler, console_2fa_callback, console_captcha_callback
 
@@ -116,20 +118,18 @@ def _convert_crawl_result_to_dict(obj, _seen=None):
     if hasattr(obj, 'isoformat'):
         try:
             return obj.isoformat()
-        except Exception:
-            pass
-    
+        except Exception as e:
+            logger.debug("isoformat() failed for %s: %s", type(obj).__name__, e)
+
     # Handle enum objects
     if hasattr(obj, 'value'):
         try:
             return obj.value
-        except Exception:
-            pass
-    
+        except Exception as e:
+            logger.debug("enum .value failed for %s: %s", type(obj).__name__, e)
+
     # For any other object type, try to extract meaningful data
-    # without falling back to string representation
     try:
-        # Try to get public attributes
         if hasattr(obj, '__class__'):
             result = {"_type": obj.__class__.__name__}
             for attr in dir(obj):
@@ -139,17 +139,13 @@ def _convert_crawl_result_to_dict(obj, _seen=None):
                         result[attr] = _convert_crawl_result_to_dict(value, _seen)
                     except Exception:
                         continue
-            # Only return if we found some attributes
-            if len(result) > 1:  # More than just _type
+            if len(result) > 1:
                 return result
-    except Exception:
-        pass
-    
-    # Clean up tracking to prevent memory leaks
-    try:
-        _seen.discard(obj_id)
-    except:
-        pass
+    except Exception as e:
+        logger.debug("Attribute extraction failed for %s: %s", type(obj).__name__, e)
+
+    # Clean up tracking
+    _seen.discard(obj_id)
     
     # Last resort: return type information instead of string
     return {"_type": type(obj).__name__, "_note": "Unable to serialize this object type"}
@@ -220,8 +216,7 @@ async def handle_llm_qa(
 ) -> str:
     """Process QA using LLM with crawled content as context."""
     try:
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
+        url = normalize_url(url)
         # Extract base URL by finding last '?q=' occurrence
         last_q_index = url.rfind('?q=')
         if last_q_index != -1:
@@ -250,7 +245,7 @@ async def handle_llm_qa(
         response = perform_completion_with_backoff(
             provider=config["llm"]["provider"],
             prompt_with_variables=prompt,
-            api_token=config["llm"]["api_key"] or os.environ.get(config["llm"].get("api_key_env", ""))
+            api_token=get_llm_api_key(config)
         )
 
         return content,response.choices[0].message.content
@@ -272,12 +267,7 @@ async def process_llm_extraction(
 ) -> None:
     """Process LLM extraction in background."""
     try:
-        # If config['llm'] has api_key then ignore the api_key_env
-        api_key = ""
-        if "api_key" in config["llm"]:
-            api_key = config["llm"]["api_key"]
-        else:
-            api_key = os.environ.get(config["llm"].get("api_key_env", None), "")
+        api_key = get_llm_api_key(config)
         llm_strategy = LLMExtractionStrategy(
             llm_config=LLMConfig(
                 provider=config["llm"]["provider"],
@@ -331,9 +321,7 @@ async def handle_markdown_request(
 ) -> str:
     """Handle markdown generation requests."""
     try:
-        decoded_url = unquote(url)
-        if not decoded_url.startswith(('http://', 'https://')):
-            decoded_url = 'https://' + decoded_url
+        decoded_url = normalize_url(unquote(url))
 
         if filter_type == FilterType.RAW:
             md_generator = DefaultMarkdownGenerator()
@@ -344,7 +332,7 @@ async def handle_markdown_request(
                 FilterType.LLM: LLMContentFilter(
                     llm_config=LLMConfig(
                         provider=config["llm"]["provider"],
-                        api_token=os.environ.get(config["llm"].get("api_key_env", None), ""),
+                        api_token=get_llm_api_key(config),
                     ),
                     instruction=query or "Extract main content"
                 )
@@ -465,9 +453,7 @@ async def create_new_task(
     config: dict
 ) -> JSONResponse:
     """Create and initialize a new task."""
-    decoded_url = unquote(input_path)
-    if not decoded_url.startswith(('http://', 'https://')):
-        decoded_url = 'https://' + decoded_url
+    decoded_url = normalize_url(unquote(input_path))
 
     from datetime import datetime
     task_id = f"llm_{int(datetime.now().timestamp())}_{id(background_tasks)}"
@@ -624,10 +610,8 @@ async def handle_crawl_request(
                 )
             
             # Enable depth crawling mode
-            url = urls[0]
-            if not url.startswith(('http://', 'https://')):
-                url = 'https://' + url
-            
+            url = normalize_url(urls[0])
+
             return await handle_depth_crawl_request(
                 url=url,
                 max_depth=max_depth,
@@ -845,9 +829,7 @@ async def handle_depth_crawl_request(
     peak_mem_mb = start_mem_mb
     
     try:
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
-            
+        url = normalize_url(url)
         browser_config = BrowserConfig.load(browser_config)
         crawler_config = CrawlerRunConfig.load(crawler_config)
         

@@ -1,5 +1,5 @@
 <template>
-  <div class="crawl-history">
+  <div id="crawl-history" class="crawl-history">
     <div class="history-header">
       <h3>Letzte Crawls</h3>
       <button @click="refresh" :disabled="loading" class="refresh-btn">
@@ -94,6 +94,8 @@ function formatDate(isoStr) {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
   })
 }
+
+defineExpose({ refresh })
 
 onMounted(() => {
   refresh()

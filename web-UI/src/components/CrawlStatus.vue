@@ -82,7 +82,8 @@ async function checkStatus() {
 
 function startPolling() {
   checkStatus()
-  pollInterval = setInterval(checkStatus, 2000)
+  const POLL_MS = parseInt(import.meta.env.VITE_POLL_INTERVAL || '2000')
+  pollInterval = setInterval(checkStatus, POLL_MS)
 }
 
 function stopPolling() {

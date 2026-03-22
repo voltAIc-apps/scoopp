@@ -122,11 +122,8 @@ RUN mkdir -p /home/appuser/.cache/ms-playwright \
 
 RUN crawl4ai-doctor
 
-# Copy application code
-COPY app/* ${APP_HOME}/
-
-# copy the playground + any future static assets
-COPY app/static ${APP_HOME}/static
+# Copy application code (files + subdirectories)
+COPY app/ ${APP_HOME}/
 
 # Make start script executable
 RUN chmod +x ${APP_HOME}/start.sh

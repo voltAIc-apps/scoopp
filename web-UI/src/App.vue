@@ -1,13 +1,13 @@
 <template>
-  <div class="app">
+  <div id="app" class="app">
     <nav class="navbar">
       <div class="nav-brand">
         <router-link to="/">Scoopp</router-link>
       </div>
       <div class="nav-links">
         <router-link to="/history">Historie</router-link>
-        <a href="http://192.168.2.93:8001/playground" target="_blank">Playground</a>
-        <a href="http://192.168.2.93:8001/docs" target="_blank">API Docs</a>
+        <a href="http://10.0.99.1:8002/playground" target="_blank">Playground</a>
+        <a href="http://10.0.99.1:8002/docs" target="_blank">API Docs</a>
       </div>
     </nav>
     <main class="main-content">

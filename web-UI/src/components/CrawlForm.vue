@@ -1,5 +1,5 @@
 <template>
-  <div class="card crawl-form">
+  <div id="crawl-form" class="card crawl-form">
     <h2>Web-Crawl starten</h2>
 
     <form @submit.prevent="handleSubmit">

@@ -76,7 +76,7 @@ from history_db import save_crawl, get_history, get_crawl
 config = load_config()
 setup_logging(config)
 
-__version__ = "0.5.1-d1"
+__version__ = config["app"]["version"]
 
 # ── global page semaphore (hard cap) ─────────────────────────
 MAX_PAGES = config["crawler"]["pool"].get("max_pages", 30)
@@ -129,10 +129,9 @@ app = FastAPI(
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://192.168.2.93:3000",
-        "http://localhost:3000",
-    ],
+    allow_origins=config.get("cors", {}).get("allowed_origins", [
+        "http://10.0.99.1:3000",
+    ]),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -199,32 +198,26 @@ ALLOWED_TYPES = {
 
 def _safe_eval_config(expr: str) -> dict:
     """
-    Accept exactly one top‑level call to CrawlerRunConfig(...) or BrowserConfig(...).
-    Whatever is inside the parentheses is fine *except* further function calls
-    (so no  __import__('os') stuff).  All public names from crawl4ai are available
-    when we eval.
+    Accept a JSON object and load it as CrawlerRunConfig or BrowserConfig.
+    The JSON must contain a top-level "_type" key set to
+    "CrawlerRunConfig" or "BrowserConfig".
     """
-    tree = ast.parse(expr, mode="eval")
+    import json as _json
+    try:
+        data = _json.loads(expr)
+    except _json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON: {e}")
 
-    # must be a single call
-    if not isinstance(tree.body, ast.Call):
-        raise ValueError("Expression must be a single constructor call")
+    if not isinstance(data, dict):
+        raise ValueError("Expression must be a JSON object")
 
-    call = tree.body
-    if not (isinstance(call.func, ast.Name) and call.func.id in {"CrawlerRunConfig", "BrowserConfig"}):
+    config_type = data.pop("_type", None)
+    if config_type not in ALLOWED_TYPES:
         raise ValueError(
-            "Only CrawlerRunConfig(...) or BrowserConfig(...) are allowed")
+            "JSON must contain '_type': 'CrawlerRunConfig' or 'BrowserConfig'")
 
-    # forbid nested calls to keep the surface tiny
-    for node in ast.walk(call):
-        if isinstance(node, ast.Call) and node is not call:
-            raise ValueError("Nested function calls are not permitted")
-
-    # expose everything that crawl4ai exports, nothing else
-    safe_env = {name: getattr(_c4, name)
-                for name in dir(_c4) if not name.startswith("_")}
-    obj = eval(compile(tree, "<config>", "eval"),
-               {"__builtins__": {}}, safe_env)
+    cls = ALLOWED_TYPES[config_type]
+    obj = cls.load(data)
     return obj.dump()
 
 
@@ -443,6 +436,7 @@ async def execute_js(
 
 
 @app.get("/llm/{url:path}")
+@limiter.limit(config["rate_limiting"]["default_limit"])
 async def llm_endpoint(
     request: Request,
     url: str = Path(...),
@@ -495,6 +489,7 @@ async def get_crawl_details(crawl_id: str):
 
 # LinkedIn Authentication Endpoints
 @app.post("/auth/linkedin/login")
+@limiter.limit(config["rate_limiting"]["default_limit"])
 async def linkedin_login_endpoint(
     request: Request,
     token: dict = Depends(token_dep)
@@ -578,6 +573,7 @@ async def remove_linkedin_session(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/crawl/linkedin")
+@limiter.limit(config["rate_limiting"]["default_limit"])
 async def crawl_linkedin_unified(
     request: Request,
     token: dict = Depends(token_dep)
@@ -707,6 +703,7 @@ async def crawl_linkedin_unified(
         }, status_code=500)
 
 @app.post("/crawl/linkedin/session-only")
+@limiter.limit(config["rate_limiting"]["default_limit"])
 async def crawl_linkedin_with_session(
     request: Request,
     token: dict = Depends(token_dep)
@@ -813,7 +810,10 @@ async def crawl(
         markdown_preview = None
         if results and len(results) > 0:
             first_result = results[0]
-            markdown_preview = first_result.get("markdown", "")[:500] if first_result.get("markdown") else None
+            md = first_result.get("markdown")
+            if isinstance(md, dict):
+                md = md.get("fit_markdown") or md.get("raw_markdown") or ""
+            markdown_preview = md[:500] if md else None
 
         # Save to history
         save_crawl(

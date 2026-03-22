@@ -6,7 +6,8 @@ import requests
 import json
 import time
 
-BASE_URL = "http://localhost:8000"
+import os
+BASE_URL = os.environ.get("SCOOPP_API_URL", "http://10.0.99.1:8002")
 
 def get_auth_token():
     """Get authentication token"""

@@ -58,9 +58,29 @@ def decode_redis_hash(hash_data: Dict[bytes, bytes]) -> Dict[str, str]:
 
 def verify_email_domain(email: str) -> bool:
     try:
+        if '@' not in email:
+            return False
         domain = email.split('@')[1]
-        # Try to resolve MX records for the domain.
         records = dns.resolver.resolve(domain, 'MX')
         return True if records else False
-    except Exception as e:
+    except Exception:
         return False
+
+
+# ── DRY utilities ────────────────────────────────────────────
+
+import os
+
+def normalize_url(url: str) -> str:
+    """Ensure URL has a scheme prefix."""
+    if not url.startswith(('http://', 'https://')):
+        return 'https://' + url
+    return url
+
+
+def get_llm_api_key(config: Dict) -> str:
+    """Resolve LLM API key from config (direct or env var)."""
+    llm = config.get("llm", {})
+    if "api_key" in llm:
+        return llm["api_key"]
+    return os.environ.get(llm.get("api_key_env", ""), "")

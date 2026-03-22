@@ -90,6 +90,10 @@ def update_research(
     processing_time_s: Optional[float] = None,
 ) -> None:
     """Update an existing research job with partial fields."""
+    ALLOWED_COLUMNS = {
+        "status", "result_json", "mail_sent", "mail_error",
+        "error_message", "processing_time_s", "completed_at",
+    }
     fields = []
     values = []
     if status is not None:
@@ -117,6 +121,11 @@ def update_research(
 
     if not fields:
         return
+
+    # validate all field names against whitelist
+    for f in fields:
+        col = f.split(" = ")[0]
+        assert col in ALLOWED_COLUMNS, f"Invalid column: {col}"
 
     values.append(research_id)
     conn = get_connection()

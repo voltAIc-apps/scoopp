@@ -9,9 +9,11 @@ logger = logging.getLogger(__name__)
 class LinkedInSessionManager:
     """Manage LinkedIn session cookies with Redis persistence"""
     
-    def __init__(self, redis: aioredis.Redis):
+    SESSION_TTL_DEFAULT = 86400 * 7  # 7 days
+
+    def __init__(self, redis: aioredis.Redis, session_ttl: int = None):
         self.redis = redis
-        self.session_ttl = 86400 * 7  # 7 days
+        self.session_ttl = session_ttl or self.SESSION_TTL_DEFAULT
         
     async def save_session(self, username: str, cookies: list, user_agent: str = None) -> bool:
         """Save LinkedIn session cookies to Redis"""

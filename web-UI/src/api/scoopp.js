@@ -1,5 +1,5 @@
 // Scoopp API client - adapted for demo branch API
-const API_BASE = import.meta.env.VITE_API_URL || 'http://192.168.2.93:8001'
+const API_BASE = import.meta.env.VITE_API_URL || 'http://10.0.99.1:8002'
 
 export const api = {
   // Fetch markdown for a single URL (simple, synchronous)
