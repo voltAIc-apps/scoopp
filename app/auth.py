@@ -53,3 +53,13 @@ def get_token_dependency(config: Dict):
 
 class TokenRequest(BaseModel):
     email: EmailStr
+
+
+# ── API key auth (X-API-Key header) for research endpoints ───
+
+def verify_api_key(request) -> None:
+    """Validate X-API-Key header against API_KEY env var."""
+    api_key = request.headers.get("X-API-Key")
+    expected = os.environ.get("API_KEY", "")
+    if not expected or not api_key or api_key != expected:
+        raise HTTPException(status_code=401, detail="Invalid API key")

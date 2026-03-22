@@ -89,3 +89,10 @@ observability:
     endpoint: "/metrics"
   health_check:
     endpoint: "/health"
+
+# Research Pipeline Configuration
+research:
+  brave_api_key_env: "BRAVE_API_KEY"
+  mail_provider_env: "MAIL_PROVIDER"
+  mail_api_key_env: "MAIL_API_KEY"
+  mail_from_env: "MAIL_FROM"
