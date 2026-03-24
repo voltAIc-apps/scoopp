@@ -29,7 +29,7 @@ redis:
 # CORS Configuration
 cors:
   allowed_origins:
-    - "http://10.0.99.1:3000"
+    - "https://scoopp.re-cloud.io"
 
 # Rate Limiting Configuration
 rate_limiting:

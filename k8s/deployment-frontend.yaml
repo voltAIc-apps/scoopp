@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scoopp-frontend
+  namespace: scoopp
+  labels:
+    app: scoopp
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scoopp
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: scoopp
+        component: frontend
+    spec:
+      imagePullSecrets:
+        - name: harbor-re-cloud
+      containers:
+        - name: frontend
+          image: crepo.re-cloud.io/scoopp/web-ui:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3

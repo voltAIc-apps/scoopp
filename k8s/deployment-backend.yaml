@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scoopp-backend
+  namespace: scoopp
+  labels:
+    app: scoopp
+    component: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scoopp
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: scoopp
+        component: backend
+    spec:
+      imagePullSecrets:
+        - name: harbor-re-cloud
+      containers:
+        - name: backend
+          image: crepo.re-cloud.io/scoopp/backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 11235
+              protocol: TCP
+          env:
+            - name: PYTHON_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: scoopp-config
+                  key: python_env
+            - name: DATA_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: scoopp-config
+                  key: data_dir
+            - name: LOG_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: scoopp-config
+                  key: log_dir
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scoopp-secret
+                  key: api_key
+            - name: BRAVE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scoopp-secret
+                  key: brave_api_key
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scoopp-secret
+                  key: openai_api_key
+            - name: MAIL_PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: scoopp-config
+                  key: mail_provider
+            - name: MAIL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scoopp-secret
+                  key: mail_api_key
+            - name: MAIL_FROM
+              valueFrom:
+                configMapKeyRef:
+                  name: scoopp-config
+                  key: mail_from
+            - name: S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: scoopp-config
+                  key: s3_endpoint
+            - name: S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: scoopp-config
+                  key: s3_bucket
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scoopp-secret
+                  key: s3_access_key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scoopp-secret
+                  key: s3_secret_key
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /logs
+            - name: dshm
+              mountPath: /dev/shm
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 11235
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 11235
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: data
+          emptyDir: {}
+          # TODO: switch back to PVC once Longhorn CSI provisioner recovers
+          # persistentVolumeClaim:
+          #   claimName: scoopp-data
+        - name: logs
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: "2Gi"

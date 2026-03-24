@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scoopp-config
+  namespace: scoopp
+data:
+  python_env: "production"
+  data_dir: "/data"
+  log_dir: "/logs"
+  mail_provider: "brevo"
+  mail_from: "sales@simplify-erp.de"
+  s3_endpoint: "https://s3.re-cloud.io"
+  s3_bucket: "marketingcompanyresearchscoopp"
