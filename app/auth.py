@@ -34,27 +34,35 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     signing_key = get_jwk_from_secret(SECRET_KEY)
     return instance.encode(to_encode, signing_key, alg='HS256')
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict:
-    """Verify the JWT token from the Authorization header."""
-
-    if credentials is None:
-        return None
-    token = credentials.credentials
-    verifying_key = get_jwk_from_secret(SECRET_KEY)
-    try:
-        payload = instance.decode(token, verifying_key, do_time_check=True, algorithms='HS256')
-        return payload
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+def _make_token_verifier(required: bool):
+    """Factory: return a FastAPI dependency that verifies JWT tokens."""
+    def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict:
+        if credentials is None:
+            if required:
+                raise HTTPException(status_code=401, detail="Authorization required")
+            return None
+        token = credentials.credentials
+        verifying_key = get_jwk_from_secret(SECRET_KEY)
+        try:
+            payload = instance.decode(token, verifying_key, do_time_check=True, algorithms='HS256')
+            return payload
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return verify_token
 
 
 def get_token_dependency(config: Dict):
     """Return the token dependency if JWT is enabled, else a function that returns None."""
-
     if config.get("security", {}).get("jwt_enabled", False):
-        return verify_token
+        return _make_token_verifier(required=True)
     else:
         return lambda: None
+
+
+def validate_secret_key():
+    """Raise if SECRET_KEY env var is not set. Call during startup when JWT is enabled."""
+    if not os.environ.get("SECRET_KEY", ""):
+        raise RuntimeError("SECRET_KEY environment variable is required when JWT is enabled")
 
 
 class TokenRequest(BaseModel):

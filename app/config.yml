@@ -34,17 +34,18 @@ cors:
 # Rate Limiting Configuration
 rate_limiting:
   enabled: True
-  default_limit: "1000/minute"
+  default_limit: "100/minute"
   trusted_proxies: []
-  storage_uri: "memory://"  # Use "redis://localhost:6379" for production
+  storage_uri: "redis://redis:6379"
 
 # Security Configuration
 security:
-  enabled: false 
-  jwt_enabled: false
+  enabled: true
+  jwt_enabled: true
   token_expire_minutes: 60
   https_redirect: false
-  trusted_hosts: ["*"]
+  https_redirect_behind_proxy: true
+  trusted_hosts: ["scoopp.re-cloud.io", "localhost", "scoopp-backend"]
   headers:
     x_content_type_options: "nosniff"
     x_frame_options: "DENY"

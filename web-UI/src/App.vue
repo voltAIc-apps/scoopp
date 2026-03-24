@@ -5,9 +5,12 @@
         <router-link to="/">Scoopp</router-link>
       </div>
       <div class="nav-links">
-        <router-link to="/history">Historie</router-link>
-        <a href="http://10.0.99.1:8002/playground" target="_blank">Playground</a>
-        <a href="http://10.0.99.1:8002/docs" target="_blank">API Docs</a>
+        <template v-if="auth.isAuthenticated">
+          <router-link to="/history">Historie</router-link>
+          <a href="/api/docs" target="_blank">API Docs</a>
+          <span class="nav-email">{{ auth.email }}</span>
+          <button class="logout-btn" @click="handleLogout">Logout</button>
+        </template>
       </div>
     </nav>
     <main class="main-content">
@@ -17,6 +20,25 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuthStore } from './stores/auth'
+
+const auth = useAuthStore()
+const router = useRouter()
+
+function handleLogout() {
+  auth.logout()
+  router.push('/login')
+}
+
+function onAuthRequired() {
+  auth.onAuthRequired()
+  router.push('/login')
+}
+
+onMounted(() => window.addEventListener('scoopp:auth-required', onAuthRequired))
+onUnmounted(() => window.removeEventListener('scoopp:auth-required', onAuthRequired))
 </script>
 
 <style scoped>
@@ -45,6 +67,7 @@
 .nav-links {
   display: flex;
   gap: 1.5rem;
+  align-items: center;
 }
 
 .nav-links a {
@@ -55,6 +78,27 @@
 
 .nav-links a:hover {
   color: white;
+}
+
+.nav-email {
+  color: #8899aa;
+  font-size: 0.85rem;
+}
+
+.logout-btn {
+  background: transparent;
+  border: 1px solid #555;
+  color: #ccc;
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.logout-btn:hover {
+  border-color: #e74c3c;
+  color: #e74c3c;
 }
 
 .main-content {

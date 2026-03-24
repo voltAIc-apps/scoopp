@@ -43,6 +43,13 @@ spec:
                 configMapKeyRef:
                   name: scoopp-config
                   key: log_dir
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scoopp-secret
+                  key: secret_key
+            - name: RATE_LIMIT_STORAGE_URI
+              value: "memory://"
             - name: API_KEY
               valueFrom:
                 secretKeyRef:

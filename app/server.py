@@ -9,7 +9,7 @@ Crawl4AI FastAPI entry‑point
 # ── stdlib & 3rd‑party imports ───────────────────────────────
 from crawler_pool import get_crawler, close_all, janitor
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
-from auth import create_access_token, get_token_dependency, TokenRequest
+from auth import create_access_token, get_token_dependency, validate_secret_key, TokenRequest
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from fastapi import Request, Depends
@@ -76,6 +76,9 @@ from services.s3_storage import upload_markdown, download_markdown
 # ────────────────── configuration / logging ──────────────────
 config = load_config()
 setup_logging(config)
+
+if config.get("security", {}).get("jwt_enabled", False):
+    validate_secret_key()
 
 __version__ = config["app"]["version"]
 
@@ -154,12 +157,14 @@ async def root():
     return RedirectResponse("/playground")
 
 # ─────────────────── infra / middleware  ─────────────────────
-redis = aioredis.from_url(config["redis"].get("uri", "redis://localhost"))
+_redis_url = os.environ.get("REDIS_URL", config["redis"].get("uri", "redis://localhost"))
+redis = aioredis.from_url(_redis_url)
 
+_rate_storage = os.environ.get("RATE_LIMIT_STORAGE_URI", config["rate_limiting"]["storage_uri"])
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[config["rate_limiting"]["default_limit"]],
-    storage_uri=config["rate_limiting"]["storage_uri"],
+    storage_uri=_rate_storage,
 )
 
 
@@ -167,8 +172,6 @@ def _setup_security(app_: FastAPI):
     sec = config["security"]
     if not sec["enabled"]:
         return
-    if sec.get("https_redirect"):
-        app_.add_middleware(HTTPSRedirectMiddleware)
     if sec.get("trusted_hosts", []) != ["*"]:
         app_.add_middleware(
             TrustedHostMiddleware, allowed_hosts=sec["trusted_hosts"]
@@ -184,10 +187,16 @@ token_dep = get_token_dependency(config)
 
 
 @app.middleware("http")
-async def add_security_headers(request: Request, call_next):
+async def security_middleware(request: Request, call_next):
+    sec = config["security"]
+    if sec.get("https_redirect_behind_proxy") and sec["enabled"]:
+        if (request.headers.get("x-forwarded-proto") == "http"
+                and request.url.path not in ("/health",)):
+            url = request.url.replace(scheme="https")
+            return RedirectResponse(url, status_code=301)
     resp = await call_next(request)
-    if config["security"]["enabled"]:
-        resp.headers.update(config["security"]["headers"])
+    if sec["enabled"]:
+        resp.headers.update(sec["headers"])
     return resp
 
 # ───────────────── safe config‑dump helper ─────────────────
@@ -228,7 +237,8 @@ app.include_router(init_research_router(redis, config, token_dep))
 
 # ──────────────────────── Endpoints ──────────────────────────
 @app.post("/token")
-async def get_token(req: TokenRequest):
+@limiter.limit("10/minute")
+async def get_token(request: Request, req: TokenRequest):
     if not verify_email_domain(req.email):
         raise HTTPException(400, "Invalid email domain")
     token = create_access_token({"sub": req.email})
