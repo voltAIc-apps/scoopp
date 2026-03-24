@@ -71,6 +71,7 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 
 import uuid
 from history_db import save_crawl, get_history, get_crawl
+from services.s3_storage import upload_markdown, download_markdown
 
 # ────────────────── configuration / logging ──────────────────
 config = load_config()
@@ -263,6 +264,9 @@ async def get_markdown(
         )
         processing_time = time.time() - start_time
 
+        # persist markdown to S3/MinIO (non-blocking on failure)
+        s3_key = await upload_markdown(crawl_id, body.url, markdown, config)
+
         # Save to history
         save_crawl(
             crawl_id=crawl_id,
@@ -272,7 +276,8 @@ async def get_markdown(
             success=True,
             pages_crawled=1,
             processing_time=processing_time,
-            markdown_preview=markdown[:500] if markdown else None
+            markdown_preview=markdown[:500] if markdown else None,
+            s3_key=s3_key
         )
 
         return JSONResponse({
@@ -282,6 +287,7 @@ async def get_markdown(
             "query": body.q,
             "cache": body.c,
             "markdown": markdown,
+            "s3_key": s3_key,
             "success": True
         })
     except Exception as e:
@@ -294,6 +300,26 @@ async def get_markdown(
             error_message=str(e)
         )
         raise
+
+
+@app.get("/md/{crawl_id}")
+async def get_stored_markdown(
+    request: Request,
+    crawl_id: str = Path(...),
+    _td: Dict = Depends(token_dep),
+):
+    """Retrieve full markdown from S3 by crawl_id."""
+    record = get_crawl(crawl_id)
+    if not record:
+        raise HTTPException(404, "Crawl not found")
+    if not record.get("s3_key"):
+        raise HTTPException(404, "No stored markdown for this crawl")
+
+    content = await download_markdown(record["s3_key"], config)
+    if content is None:
+        raise HTTPException(502, "Could not retrieve markdown from storage")
+
+    return PlainTextResponse(content, media_type="text/markdown; charset=utf-8")
 
 
 @app.post("/html")

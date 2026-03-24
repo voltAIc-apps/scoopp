@@ -41,6 +41,11 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_status
         ON crawl_history(status)
     """)
+    # migration: add s3_key column for markdown persistence
+    try:
+        conn.execute("ALTER TABLE crawl_history ADD COLUMN s3_key TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
     conn.close()
 
@@ -54,15 +59,17 @@ def save_crawl(
     max_depth: Optional[int] = None,
     pages_crawled: int = 0,
     processing_time: Optional[float] = None,
-    markdown_preview: Optional[str] = None
+    markdown_preview: Optional[str] = None,
+    s3_key: Optional[str] = None
 ) -> None:
     """Save crawl request to history."""
     conn = get_connection()
     conn.execute("""
         INSERT INTO crawl_history
         (crawl_id, request_type, status, created_at, urls, success,
-         error_message, max_depth, pages_crawled, processing_time_s, markdown_preview)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         error_message, max_depth, pages_crawled, processing_time_s,
+         markdown_preview, s3_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         crawl_id,
         request_type,
@@ -74,7 +81,8 @@ def save_crawl(
         max_depth,
         pages_crawled,
         processing_time,
-        markdown_preview[:500] if markdown_preview else None
+        markdown_preview[:500] if markdown_preview else None,
+        s3_key
     ))
     conn.commit()
     conn.close()
@@ -84,7 +92,7 @@ def get_history(limit: int = 50, offset: int = 0) -> List[Dict]:
     conn = get_connection()
     rows = conn.execute("""
         SELECT crawl_id, request_type, status, created_at, urls,
-               success, pages_crawled, processing_time_s, markdown_preview
+               success, pages_crawled, processing_time_s, markdown_preview, s3_key
         FROM crawl_history
         ORDER BY created_at DESC
         LIMIT ? OFFSET ?
@@ -101,7 +109,8 @@ def get_history(limit: int = 50, offset: int = 0) -> List[Dict]:
             "success": bool(row["success"]),
             "pages_crawled": row["pages_crawled"],
             "processing_time_s": row["processing_time_s"],
-            "markdown_preview": row["markdown_preview"]
+            "markdown_preview": row["markdown_preview"],
+            "s3_key": row["s3_key"]
         }
         for row in rows
     ]
@@ -128,7 +137,8 @@ def get_crawl(crawl_id: str) -> Optional[Dict]:
         "max_depth": row["max_depth"],
         "pages_crawled": row["pages_crawled"],
         "processing_time_s": row["processing_time_s"],
-        "markdown_preview": row["markdown_preview"]
+        "markdown_preview": row["markdown_preview"],
+        "s3_key": row["s3_key"]
     }
 
 # Initialize database on module import

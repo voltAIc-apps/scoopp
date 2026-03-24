@@ -72,6 +72,14 @@ async def run_research_pipeline(
         try:
             markdown = await _crawl_website(company_url, fmt, config)
             if markdown:
+                # persist markdown to S3/MinIO
+                from services.s3_storage import upload_markdown
+                s3_key = await upload_markdown(
+                    research_id, company_url, markdown, config
+                )
+                if s3_key:
+                    company_info["markdown_s3_key"] = s3_key
+
                 extracted = await _extract_company_fields(markdown, config)
                 if extracted:
                     company_info.update(
